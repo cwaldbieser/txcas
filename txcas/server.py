@@ -23,9 +23,11 @@ class InvalidTicket(Exception):
 class ServerApp(object):
 
     app = Klein()
+    COOKIE_NAME = 'tgc'
 
     
     def __init__(self, ticket_store, realm, checkers, validService=None):
+        self.cookies = {}
         self.ticket_store = ticket_store
         self.portal = Portal(realm)
         map(self.portal.registerChecker, checkers)
@@ -77,6 +79,7 @@ class ServerApp(object):
             return user.username
 
         def mkServiceTicket(username, service):
+            request.addCookie(self.COOKIE_NAME, 'value')
             return self.ticket_store.mkServiceTicket(username, service)
 
         def redirect(ticket, service, request):
@@ -153,12 +156,14 @@ class InMemoryTicketStore(object):
     """
 
     lifespan = 10
+    cookie_lifespan = 60 * 60 * 24 * 2
     charset = string.ascii_letters + string.digits + '-'
 
 
     def __init__(self, reactor=reactor):
         self.reactor = reactor
         self._tickets = {}
+        self._delays = {}
 
 
     def _generate(self, prefix):
@@ -168,7 +173,7 @@ class InMemoryTicketStore(object):
         return r
 
 
-    def _mkTicket(self, prefix, data):
+    def _mkTicket(self, prefix, data, _timeout=None):
         """
         Create a ticket prefixed with C{prefix}
 
@@ -178,20 +183,23 @@ class InMemoryTicketStore(object):
         @param data: Data associated with this ticket (which will be returned
             when L{_useTicket} is called).
         """
+        timeout = _timeout or self.lifespan
         ticket = self._generate(prefix)
         self._tickets[ticket] = data
-        self.reactor.callLater(self.lifespan, self._expireTicket, ticket)
+        dc = self.reactor.callLater(timeout, self._expireTicket, ticket)
+        self._delays[ticket] = (dc, timeout)
         return defer.succeed(ticket)
 
 
     def _expireTicket(self, val):
         try:
             del self._tickets[val]
+            del self._delays[val]
         except KeyError:
             pass
 
 
-    def _useTicket(self, ticket):
+    def _useTicket(self, ticket, _consume=True):
         """
         Consume a ticket, producing the data that was associated with the ticket
         when it was created.
@@ -199,7 +207,13 @@ class InMemoryTicketStore(object):
         @raise InvalidTicket: If the ticket doesn't exist or is no longer valid.
         """
         try:
-            return defer.succeed(self._tickets.pop(ticket))
+            val = self._tickets[ticket]
+            if _consume:
+                del self._tickets[ticket]
+            else:
+                dc, timeout = self._delays[ticket]
+                dc.reset(timeout)
+            return defer.succeed(val)
         except KeyError:
             return defer.fail(InvalidTicket())
 
@@ -252,6 +266,25 @@ class InMemoryTicketStore(object):
                 raise InvalidTicket()
             return data['username']
         return data.addCallback(cb)
+
+
+    def mkTicketGrantingCookie(self, username):
+        """
+        Create a ticket to be used in a cookie.
+
+        XXX
+        """
+        return self._mkTicket('TGC-', username, _timeout=self.cookie_lifespan)
+
+
+    def useTicketGrantingCookie(self, ticket):
+        """
+        Get the username associated with this ticket.
+
+        XXX
+        """
+        return self._useTicket(ticket, _consume=False)
+
 
 
 

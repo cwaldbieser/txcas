@@ -7,6 +7,8 @@ from twisted.web.test.test_web import DummyChannel
 from twisted.web.http_headers import Headers
 from twisted.python.filepath import FilePath
 
+from Cookie import BaseCookie
+
 from mock import Mock
 from urlparse import urlparse, parse_qs
 
@@ -115,6 +117,29 @@ class InMemoryTicketStoreTest(TestCase):
         self.assertFailure(store.useServiceTicket(t, 'bar'), InvalidTicket)
 
 
+    @defer.inlineCallbacks
+    def test_ticketGrantingCookie(self):
+        """
+        These tickets have a longer, extendable timeout and aren't consumed
+        when used.
+        """
+        store = self.getStore()
+        t = yield store.mkTicketGrantingCookie('username')
+        self.assertTrue(t.startswith('TGC-'))
+
+        # move ahead a little bit
+        self.clock.advance(store.cookie_lifespan/2)
+
+        username = yield store.useTicketGrantingCookie(t)
+        self.assertEqual(username, 'username')
+        
+        # it should be extended beyond the last access
+        self.clock.advance(store.cookie_lifespan-1)
+        username = yield store.useTicketGrantingCookie(t)
+        self.assertEqual(username, 'username')
+        
+        self.clock.advance(store.cookie_lifespan)
+        self.assertFailure(store.useTicketGrantingCookie(t), InvalidTicket)
 
 
 
@@ -159,6 +184,7 @@ class FakeRequest(server.Request):
 
 
     def __init__(self, args=None):
+        server.Request.__init__(self, DummyChannel(), False)
         self.args = args or {}
         self.responseHeaders = defaultdict(lambda:[])
         self.responseCode = None
@@ -361,6 +387,54 @@ class FunctionalTest(TestCase):
         self.assertEqual(request.responseCode, 403)
         self.assertEqual(body, 'no\n\n')
 
+
+    @defer.inlineCallbacks
+    def test_ticket_granting_cookie_success(self):
+        """
+        After authenticating once, a client should be able to reuse a
+        ticket-granting cookie to authenticate again without having to put
+        in credentials.
+        """
+        app = self.app
+
+        # GET
+        request = FakeRequest(args={
+            'service': ['foo'],
+        })
+        body = yield self.app.login_GET(request)
+        inputs = self.getInputs(body)
+
+        # POST
+        request = FakeRequest(args={
+            'username': ['foo'],
+            'password': ['something'],
+            'lt': [inputs['lt']['value']],
+            'service': ['foo'],
+        })
+        body = yield self.app.login_POST(request)
+        self.assertTrue(len(request.cookies) >= 1, "Should have at least one"
+                        " cookie")
+        cookies = [BaseCookie(x) for x in request.cookies]
+        morsels = [x[x.keys()[0]] for x in cookies]
+        tgc = [x for x in morsels if x.key == app.COOKIE_NAME][0]
+        self.assertEqual(tgc['expires'], '', "Should expire at end of session")
+        self.assertTrue(tgc.value.startswith('TGC-'))
+        self.assertEqual(tgc['secure'], 'yes', "Should be secure")
+        self.assertEqual(tgc['httponly'], 'yes', "Should be httponly")
+
+
+
+        # GET again
+        request = FakeRequest(args={
+            'service': ['somewhere'],
+        }, )
+
+
+    def test_logout(self):
+        """
+        You can log out
+        """
+        self.fail('write me')
 
 
 
