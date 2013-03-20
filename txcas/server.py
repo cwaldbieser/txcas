@@ -38,7 +38,7 @@ class ServerApp(object):
         Present a username/password login page to the browser.
         """
         service = request.args['service'][0]
-        d = self.ticket_store.mkLoginTicket(None)
+        d = self.ticket_store.mkLoginTicket(service)
         def render(ticket, service):
             return '''
             <html>
@@ -67,12 +67,17 @@ class ServerApp(object):
         service = request.args['service'][0]
         username = request.args['username'][0]
         password = request.args['password'][0]
+        ticket = request.args['lt'][0]
+
+        def checkPassword(_, username, password):
+            credentials = UsernamePassword(username, password)
+            return self.portal.login(credentials, None, IUser)
 
         def extractUsername(user):
             return user.username
 
         def mkServiceTicket(username, service):
-            return self.ticket_store.mkServiceTicket(username, None)
+            return self.ticket_store.mkServiceTicket(username, service)
 
         def redirect(ticket, service, request):
             query = urlencode({
@@ -88,8 +93,8 @@ class ServerApp(object):
             request.setResponseCode(403)
 
         # check credentials
-        credentials = UsernamePassword(username, password)
-        d = self.portal.login(credentials, None, IUser)
+        d = self.ticket_store.useLoginTicket(ticket, service)
+        d.addCallback(checkPassword, username, password)
         d.addCallback(extractUsername)
         d.addCallback(mkServiceTicket, service)
         d.addCallback(redirect, service, request)
@@ -103,13 +108,19 @@ class ServerApp(object):
         Validate a service ticket, consuming the ticket in the process.
         """
         ticket = request.args['ticket'][0]
-        username = self.ticket_store.useServiceTicket(ticket, None)
-        def gotUsername(username):
+        service = request.args['service'][0]
+        d = self.ticket_store.useServiceTicket(ticket, service)
+
+        def renderUsername(username):
             return 'yes\n' + username + '\n'
-        return username.addCallback(gotUsername)
 
+        def renderFailure(err, request):
+            request.setResponseCode(403)
+            return 'no\n\n'
 
-        
+        d.addCallback(renderUsername)
+        d.addErrback(renderFailure, request)
+        return d        
 
 
 
