@@ -30,10 +30,12 @@ class ServerApp(object):
     cookie_name = 'tgc'
 
     
-    def __init__(self, ticket_store, realm, checkers, validService=None):
+    def __init__(self, ticket_store, realm, checkers, validService=None,
+                 requireSSL=True):
         self.cookies = {}
         self.ticket_store = ticket_store
         self.portal = Portal(realm)
+        self.requireSSL = requireSSL
         map(self.portal.registerChecker, checkers)
         self.validService = validService or (lambda x: True)
 
@@ -54,6 +56,14 @@ class ServerApp(object):
 
         service = request.args['service'][0]
         d = self.ticket_store.useTicketGrantingCookie(tgc)
+
+        # XXX untested
+        def eb(err, request):
+            # delete the cookie
+            request.addCookie(self.cookie_name, '',
+                              expires='Thu, 01 Jan 1970 00:00:00 GMT')
+            return err
+        d.addErrback(eb, request)
         return d.addCallback(self._authenticated, service, request)
 
 
@@ -64,11 +74,12 @@ class ServerApp(object):
             return '''
             <html>
                 <body>
-                    <form method="post" action="/login">
-                        <input type="text" name="username" />
-                        <input type="password" name="password" />
+                    <form method="post" action="">
+                        Username: <input type="text" name="username" />
+                        <br />Password: <input type="password" name="password" />
                         <input type="hidden" name="lt" value="%(lt)s" />
                         <input type="hidden" name="service" value="%(service)s" />
+                        <input type="submit" value="Sign in" />
                     </form>
                 </body>
             </html>
@@ -88,7 +99,8 @@ class ServerApp(object):
             if not request.getCookie(self.cookie_name):
                 path = request.URLPath().sibling('').path
                 ticket = yield self.ticket_store.mkTicketGrantingCookie(username)
-                request.addCookie(self.cookie_name, ticket, path=path, secure=True)
+                request.addCookie(self.cookie_name, ticket, path=path,
+                                  secure=self.requireSSL)
                 request.cookies[-1] += '; HttpOnly'
             defer.returnValue(username)
 
