@@ -19,11 +19,15 @@ class InvalidTicket(Exception):
     pass
 
 
+class CookieAuthFailed(Exception):
+    pass
+
+
 
 class ServerApp(object):
 
     app = Klein()
-    COOKIE_NAME = 'tgc'
+    cookie_name = 'tgc'
 
     
     def __init__(self, ticket_store, realm, checkers, validService=None):
@@ -39,6 +43,21 @@ class ServerApp(object):
         """
         Present a username/password login page to the browser.
         """
+        d = self._authenticateByCookie(request)
+        return d.addErrback(lambda _:self._presentLogin(request))
+
+
+    def _authenticateByCookie(self, request):
+        tgc = request.getCookie(self.cookie_name)
+        if not tgc:
+            return defer.fail(CookieAuthFailed("No cookie"))
+
+        service = request.args['service'][0]
+        d = self.ticket_store.useTicketGrantingCookie(tgc)
+        return d.addCallback(self._authenticated, service, request)
+
+
+    def _presentLogin(self, request):
         service = request.args['service'][0]
         d = self.ticket_store.mkLoginTicket(service)
         def render(ticket, service):
@@ -60,6 +79,34 @@ class ServerApp(object):
         return d.addCallback(render, service)
 
 
+    def _authenticated(self, username, service, request):
+        """
+        Call this after authentication has succeeded to finish the request.
+        """
+        @defer.inlineCallbacks
+        def maybeAddCookie(username, request):
+            if not request.getCookie(self.cookie_name):
+                path = request.URLPath().sibling('').path
+                ticket = yield self.ticket_store.mkTicketGrantingCookie(username)
+                request.addCookie(self.cookie_name, ticket, path=path, secure=True)
+                request.cookies[-1] += '; HttpOnly'
+            defer.returnValue(username)
+
+        def mkServiceTicket(username, service):
+            
+            return self.ticket_store.mkServiceTicket(username, service)
+
+        def redirect(ticket, service, request):
+            query = urlencode({
+                'ticket': ticket,
+            })
+            request.redirect(service + '?' + query)
+
+        d = maybeAddCookie(username, request)
+        d.addCallback(mkServiceTicket, service)
+        return d.addCallback(redirect, service, request)
+
+
     @app.route('/login', methods=['POST'])
     def login_POST(self, request):
         """
@@ -77,16 +124,7 @@ class ServerApp(object):
 
         def extractUsername(user):
             return user.username
-
-        def mkServiceTicket(username, service):
-            request.addCookie(self.COOKIE_NAME, 'value')
-            return self.ticket_store.mkServiceTicket(username, service)
-
-        def redirect(ticket, service, request):
-            query = urlencode({
-                'ticket': ticket,
-            })
-            request.redirect(service + '?' + query)
+        
 
         def eb(err, service, request):
             query = urlencode({
@@ -99,10 +137,18 @@ class ServerApp(object):
         d = self.ticket_store.useLoginTicket(ticket, service)
         d.addCallback(checkPassword, username, password)
         d.addCallback(extractUsername)
-        d.addCallback(mkServiceTicket, service)
-        d.addCallback(redirect, service, request)
+        d.addCallback(self._authenticated, service, request)
         d.addErrback(eb, service, request)
         return d
+
+
+    @app.route('/logout', methods=['GET'])
+    def logout_GET(self, request):
+        tgc = request.getCookie(self.cookie_name)
+        self.ticket_store.expireTicket(tgc)
+        request.addCookie(self.cookie_name, '',
+                          expires='Thu, 01 Jan 1970 00:00:00 GMT')
+        return 'You have been logged out'
 
 
     @app.route('/validate', methods=['GET'])
@@ -186,12 +232,12 @@ class InMemoryTicketStore(object):
         timeout = _timeout or self.lifespan
         ticket = self._generate(prefix)
         self._tickets[ticket] = data
-        dc = self.reactor.callLater(timeout, self._expireTicket, ticket)
+        dc = self.reactor.callLater(timeout, self.expireTicket, ticket)
         self._delays[ticket] = (dc, timeout)
         return defer.succeed(ticket)
 
 
-    def _expireTicket(self, val):
+    def expireTicket(self, val):
         try:
             del self._tickets[val]
             del self._delays[val]

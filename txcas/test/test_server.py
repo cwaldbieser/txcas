@@ -7,8 +7,6 @@ from twisted.web.test.test_web import DummyChannel
 from twisted.web.http_headers import Headers
 from twisted.python.filepath import FilePath
 
-from Cookie import BaseCookie
-
 from mock import Mock
 from urlparse import urlparse, parse_qs
 
@@ -26,6 +24,39 @@ import re
 import sys
 
 from collections import defaultdict
+
+
+
+class FakeRequest(server.Request):
+
+
+    def __init__(self, method='GET', path='/', args=None, isSecure=False,
+                 headers=None):
+        server.Request.__init__(self, DummyChannel(), False)
+        self.requestHeaders = Headers(headers)
+        self.args = args or {}
+        self.method = method
+        self.uri = path
+        self.clientproto = 'HTTP/1.1'
+        self.prepath = path.split('/')[1:]
+        self.postpath = []
+        self.setHost('127.0.0.1', 8080, isSecure)
+        self.responseHeaders = defaultdict(lambda:[])
+        self.responseCode = None
+        self.redirected = None
+        self.parseCookies()
+
+
+    def setHeader(self, key, value):
+        self.responseHeaders[key].append(value)
+
+
+    def setResponseCode(self, code):
+        self.responseCode = code
+
+
+    def redirect(self, where):
+        self.redirected = where
 
 
 
@@ -137,7 +168,7 @@ class InMemoryTicketStoreTest(TestCase):
         self.clock.advance(store.cookie_lifespan-1)
         username = yield store.useTicketGrantingCookie(t)
         self.assertEqual(username, 'username')
-        
+
         self.clock.advance(store.cookie_lifespan)
         self.assertFailure(store.useTicketGrantingCookie(t), InvalidTicket)
 
@@ -177,30 +208,6 @@ class ServerAppTest(TestCase):
         self.assertEqual(app.portal.realm, realm)
         self.assertIn(checker, app.portal.checkers.values())
         self.assertEqual(app.validService, 'services')
-
-
-
-class FakeRequest(server.Request):
-
-
-    def __init__(self, args=None):
-        server.Request.__init__(self, DummyChannel(), False)
-        self.args = args or {}
-        self.responseHeaders = defaultdict(lambda:[])
-        self.responseCode = None
-        self.redirected = None
-
-
-    def setHeader(self, key, value):
-        self.responseHeaders[key].append(value)
-
-
-    def setResponseCode(self, code):
-        self.responseCode = code
-
-
-    def redirect(self, where):
-        self.redirected = where
 
 
 
@@ -397,15 +404,15 @@ class FunctionalTest(TestCase):
         """
         app = self.app
 
-        # GET
+        # GET /login
         request = FakeRequest(args={
             'service': ['foo'],
         })
         body = yield self.app.login_GET(request)
         inputs = self.getInputs(body)
 
-        # POST
-        request = FakeRequest(args={
+        # POST /login
+        request = FakeRequest(method='POST', path='/cas/login', args={
             'username': ['foo'],
             'password': ['something'],
             'lt': [inputs['lt']['value']],
@@ -414,30 +421,83 @@ class FunctionalTest(TestCase):
         body = yield self.app.login_POST(request)
         self.assertTrue(len(request.cookies) >= 1, "Should have at least one"
                         " cookie")
-        cookies = [BaseCookie(x) for x in request.cookies]
-        morsels = [x[x.keys()[0]] for x in cookies]
-        tgc = [x for x in morsels if x.key == app.COOKIE_NAME][0]
-        self.assertEqual(tgc['expires'], '', "Should expire at end of session")
-        self.assertTrue(tgc.value.startswith('TGC-'))
-        self.assertEqual(tgc['secure'], 'yes', "Should be secure")
-        self.assertEqual(tgc['httponly'], 'yes', "Should be httponly")
-
-
-
-        # GET again
+        cookie = request.cookies[0]
+        parts = cookie.split('; ')
+        self.assertIn('Secure', parts)
+        self.assertIn('HttpOnly', parts)
+        self.assertIn('Path=/cas/', parts)
+        name, value = parts[0].split('=', 1)
+        self.assertEqual(name, self.app.cookie_name)
+        self.assertTrue(value.startswith('TGC-'))
+        
+        # GET /login again with the cookie for a different service
+        parts.remove('Secure')
+        parts.remove('HttpOnly')
         request = FakeRequest(args={
             'service': ['somewhere'],
-        }, )
+        }, headers={
+            'Cookie': ['; '.join(parts)],
+        })
+        body = yield self.app.login_GET(request)
+        redirect_url = request.redirected
+        self.assertTrue(redirect_url.startswith('somewhere'), redirect_url)
+        parsed = urlparse(redirect_url)
+        qs = parse_qs(parsed.query)
+        ticket = qs['ticket'][0]
+
+        self.assertEqual(len(request.cookies), 0, "Should not set the cookie "
+                         "again")
+
+        # GET /validate
+        request = FakeRequest(args={
+            'service': ['somewhere'],
+            'ticket': [ticket],
+        })
+
+        body = yield self.app.validate_GET(request)
+        self.assertEqual(body, 'yes\nfoo\n')
 
 
+    @defer.inlineCallbacks
     def test_logout(self):
         """
-        You can log out
+        You can log out (which will invalidate the ticket granting cookie)
         """
-        self.fail('write me')
+        app = self.app
 
+        # GET /login
+        request = FakeRequest(args={
+            'service': ['foo'],
+        })
+        body = yield self.app.login_GET(request)
+        inputs = self.getInputs(body)
 
+        # POST /login
+        request = FakeRequest(method='POST', path='/cas/login', args={
+            'username': ['foo'],
+            'password': ['something'],
+            'lt': [inputs['lt']['value']],
+            'service': ['foo'],
+        })
+        body = yield self.app.login_POST(request)
+        self.assertTrue(len(request.cookies) >= 1, "Should have at least one"
+                        " cookie")
+        cookie = request.cookies[0]
 
+        # GET /logout
+        request = FakeRequest(headers={
+            'Cookie': [cookie],
+        })
+        body = yield self.app.logout_GET(request)
 
+        # GET /login again with the cookie
+        request = FakeRequest(args={
+            'service': ['somewhere'],
+        }, headers={
+            'Cookie': [cookie],
+        })
+        body = yield self.app.login_GET(request)
+        inputs = self.getInputs(body)
+        self.assertIn('lt', inputs)
 
 
