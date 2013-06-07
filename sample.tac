@@ -12,11 +12,9 @@ def authorize(username, password):
 
 def valid_service(url):
     """
-    Authorize anything from localhost
+    Authorize anything
     """
-    if url.startswith('https://localhost'):
-        return True
-    return False
+    return True
 
 
 # How long do transient tickets last?
