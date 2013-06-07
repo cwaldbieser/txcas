@@ -396,6 +396,23 @@ class FunctionalTest(TestCase):
 
 
     @defer.inlineCallbacks
+    def test_invalidServices(self):
+        """
+        If the service doesn't match the validService function, fail all
+        service-related requests
+        """
+        app = self.app
+        app.ticket_store.valid_service = lambda x: False
+
+        request = FakeRequest(args={
+            'service': ['foo'],
+        })
+
+        body = yield self.app.login_GET(request)
+        self.assertEqual(request.responseCode, 400)
+
+
+    @defer.inlineCallbacks
     def test_ticket_granting_cookie_success(self):
         """
         After authenticating once, a client should be able to reuse a

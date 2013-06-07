@@ -19,6 +19,10 @@ class InvalidTicket(Exception):
     pass
 
 
+class InvalidService(Exception):
+    pass
+
+
 class CookieAuthFailed(Exception):
     pass
 
@@ -46,7 +50,10 @@ class ServerApp(object):
         Present a username/password login page to the browser.
         """
         d = self._authenticateByCookie(request)
-        return d.addErrback(lambda _:self._presentLogin(request))
+        d.addErrback(lambda _:self._presentLogin(request))
+        def eb(r, request):
+            request.setResponseCode(400)
+        return d.addErrback(eb, request)
 
 
     def _authenticateByCookie(self, request):
@@ -218,10 +225,18 @@ class InMemoryTicketStore(object):
     charset = string.ascii_letters + string.digits + '-'
 
 
-    def __init__(self, reactor=reactor):
+    def __init__(self, reactor=reactor, valid_service=None):
         self.reactor = reactor
         self._tickets = {}
         self._delays = {}
+        self.valid_service = valid_service or (lambda x:True)
+
+
+    def _validService(self, service):
+        def cb(result):
+            if not result:
+                raise InvalidService(service)
+        return defer.maybeDeferred(self.valid_service, service).addCallback(cb)
 
 
     def _generate(self, prefix):
@@ -282,9 +297,12 @@ class InMemoryTicketStore(object):
 
         XXX
         """
-        return self._mkTicket('LT-', {
-            'service': service,
-        })
+        d = self._validService(service)
+        def cb(_):
+            return self._mkTicket('LT-', {
+                'service': service,
+            })
+        return d.addCallback(cb)
 
 
     def useLoginTicket(self, ticket, service):
@@ -293,11 +311,13 @@ class InMemoryTicketStore(object):
 
         XXX
         """
-        data = self._useTicket(ticket)
-        def cb(data):
-            if data['service'] != service:
-                raise InvalidTicket()
-        return data.addCallback(cb)
+        def doit(_):
+            data = self._useTicket(ticket)
+            def cb(data):
+                if data['service'] != service:
+                    raise InvalidTicket()
+            return data.addCallback(cb)
+        return self._validService(service).addCallback(doit)
 
 
     def mkServiceTicket(self, username, service):
@@ -306,10 +326,12 @@ class InMemoryTicketStore(object):
 
         XXX
         """
-        return self._mkTicket('ST-', {
-            'username': username,
-            'service': service,
-        })
+        def doit(_):
+            return self._mkTicket('ST-', {
+                'username': username,
+                'service': service,
+            })
+        return self._validService(service).addCallback(doit)
 
 
     def useServiceTicket(self, ticket, service):
@@ -318,12 +340,14 @@ class InMemoryTicketStore(object):
 
         XXX
         """
-        data = self._useTicket(ticket)
-        def cb(data):
-            if data['service'] != service:
-                raise InvalidTicket()
-            return data['username']
-        return data.addCallback(cb)
+        def doit(_):
+            data = self._useTicket(ticket)
+            def cb(data):
+                if data['service'] != service:
+                    raise InvalidTicket()
+                return data['username']
+            return data.addCallback(cb)
+        return self._validService(service).addCallback(doit)
 
 
     def mkTicketGrantingCookie(self, username):
