@@ -42,7 +42,7 @@ class MyApp(object):
         if not ticket:
             return 'Invalid login attempt'
 
-        url = self.cas_root + '/validate'
+        url = self.cas_root + '/serviceValidate'
         params = urlencode({
             'service': str(request.URLPath()),
             'ticket': ticket,
@@ -52,8 +52,15 @@ class MyApp(object):
 
         d = getPage(url)
         def gotResponse(response):
-            valid, username, _ = response.split('\n')
-            if valid != 'yes':
+            print response
+            if response.find("<cas:authenticationSuccess>") != -1:
+                valid = True
+                for line in response.split("\n"):
+                    line = line.strip()
+                    if line.startswith("<cas:user>"):
+                        username = line[10:-11]
+                        break
+            if not valid:
                 raise Exception('Invalid login')
             session = request.getSession()
             session.username = username

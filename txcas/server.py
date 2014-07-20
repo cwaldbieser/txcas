@@ -13,7 +13,38 @@ import uuid
 import random
 import string
 import cgi
+from xml.sax.saxutils import escape as xml_escape
+from textwrap import dedent
+import sys
 
+
+def make_cas_attributes(attribs):
+    """
+    Create CAS attributes from a list of (key, value) tuples.
+
+    E.g.:
+    <cas:attributes>
+         <cas:firstname>John</cas:firstname>
+         <cas:lastname>Doe</cas:lastname>
+         <cas:title>Mr.</cas:title>
+         <cas:email>jdoe@example.orgmailto:jdoe@example.org</cas:email>
+         <cas:affiliation>staff</cas:affiliation>
+         <cas:affiliation>faculty</cas:affiliation>
+   </cas:attributes>
+    """
+    if len(attribs) == 0:
+        return ""
+    parts = ["<cas:attributes>"]
+    for k, v in attribs:
+        k = sanitize_keyname(k)
+        parts.append("    <cas:%s>%s</cas:%s>" % (k, xml_escape(v), k))
+    parts.append("</cas:attributes>") 
+    return '\n'.join(parts)
+
+def sanitize_keyname(name):
+    include = set(string.ascii_letters + "-_")
+    s = ''.join(ch for ch in name if ch in include)
+    return s
 
 class InvalidTicket(Exception):
     pass
@@ -35,13 +66,18 @@ class ServerApp(object):
 
     
     def __init__(self, ticket_store, realm, checkers, validService=None,
-                 requireSSL=True):
+                 requireSSL=True, renderLogin=None):
         self.cookies = {}
         self.ticket_store = ticket_store
         self.portal = Portal(realm)
         self.requireSSL = requireSSL
         map(self.portal.registerChecker, checkers)
         self.validService = validService or (lambda x: True)
+        # ENHANCEMENT: A function to allow you to render your own
+        # custom login page.  Should accept (loginTicket, service).
+        # The rendered page should POST to /login and should include 
+        # the login ticket provided and the service callback.
+        self.renderLogin = renderLogin
 
 
     @app.route('/login', methods=['GET'])
@@ -60,7 +96,7 @@ class ServerApp(object):
         tgc = request.getCookie(self.cookie_name)
         if not tgc:
             return defer.fail(CookieAuthFailed("No cookie"))
-
+        # Q: Should the ticket-granting cookie be checked for expiration?
         service = request.args['service'][0]
         d = self.ticket_store.useTicketGrantingCookie(tgc)
 
@@ -75,6 +111,12 @@ class ServerApp(object):
 
 
     def _presentLogin(self, request):
+        # ENHANCEMENT Login page should be customizable.
+        # - Below, `render()` could be a default, but the server should
+        # allow you to provide your own `render(login_ticket, service)`
+        # that allows you to render your own page.
+        # - Any additional information to the custom `render()` could be
+        # provided by class state or a closure, for example.
         service = request.args['service'][0]
         d = self.ticket_store.mkLoginTicket(service)
         def render(ticket, service):
@@ -97,23 +139,22 @@ class ServerApp(object):
         return d.addCallback(render, service)
 
 
-    def _authenticated(self, username, service, request):
+    def _authenticated(self, user, service, request):
         """
         Call this after authentication has succeeded to finish the request.
         """
         @defer.inlineCallbacks
-        def maybeAddCookie(username, request):
+        def maybeAddCookie(user, request):
             if not request.getCookie(self.cookie_name):
                 path = request.URLPath().sibling('').path
-                ticket = yield self.ticket_store.mkTicketGrantingCookie(username)
+                ticket = yield self.ticket_store.mkTicketGrantingCookie(user)
                 request.addCookie(self.cookie_name, ticket, path=path,
                                   secure=self.requireSSL)
                 request.cookies[-1] += '; HttpOnly'
-            defer.returnValue(username)
+            defer.returnValue(user)
 
-        def mkServiceTicket(username, service):
-            
-            return self.ticket_store.mkServiceTicket(username, service)
+        def mkServiceTicket(user, service):
+            return self.ticket_store.mkServiceTicket(user, service)
 
         def redirect(ticket, service, request):
             query = urlencode({
@@ -121,7 +162,7 @@ class ServerApp(object):
             })
             request.redirect(service + '?' + query)
 
-        d = maybeAddCookie(username, request)
+        d = maybeAddCookie(user, request)
         d.addCallback(mkServiceTicket, service)
         return d.addCallback(redirect, service, request)
 
@@ -141,10 +182,6 @@ class ServerApp(object):
             credentials = UsernamePassword(username, password)
             return self.portal.login(credentials, None, IUser)
 
-        def extractUsername(user):
-            return user.username
-        
-
         def eb(err, service, request):
             query = urlencode({
                 'service': service,
@@ -155,7 +192,6 @@ class ServerApp(object):
         # check credentials
         d = self.ticket_store.useLoginTicket(ticket, service)
         d.addCallback(checkPassword, username, password)
-        d.addCallback(extractUsername)
         d.addCallback(self._authenticated, service, request)
         d.addErrback(eb, service, request)
         return d
@@ -179,8 +215,8 @@ class ServerApp(object):
         service = request.args['service'][0]
         d = self.ticket_store.useServiceTicket(ticket, service)
 
-        def renderUsername(username):
-            return 'yes\n' + username + '\n'
+        def renderUsername(user):
+            return 'yes\n' + user.username + '\n'
 
         def renderFailure(err, request):
             request.setResponseCode(403)
@@ -190,6 +226,50 @@ class ServerApp(object):
         d.addErrback(renderFailure, request)
         return d        
 
+    @app.route('/serviceValidate', methods=['GET'])
+    def serviceValidate_GET(self, request):
+        """
+        Validate a service ticket, consuming the ticket in the process.
+        """
+        ticket = request.args['ticket'][0]
+        service = request.args['service'][0]
+        d = self.ticket_store.useServiceTicket(ticket, service)
+
+        def renderSuccess(avatar):
+            doc_begin = dedent("""\
+                <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+                    <cas:authenticationSuccess>
+                    <cas:user>%s</cas:user>
+                """) % xml_escape(avatar.username)
+            doc_attributes = make_cas_attributes(avatar.attribs)
+            doc_proxy = ""
+            doc_end = dedent("""\
+                    </cas:authenticationSuccess>
+                </cas:serviceResponse>
+                """)
+            doc_parts = [doc_begin]
+            for part in (doc_attributes, doc_proxy,):
+                if len(part) > 0:
+                    doc_parts.append(part)
+            doc_parts.append(doc_end)
+            return '\n'.join(doc_parts)
+
+        def renderFailure(err, request):
+            sys.stderr.write(err)
+            sys.stderr.write("\n")
+            request.setResponseCode(403)
+            doc_fail = dedent("""\
+                <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+                   <cas:authenticationFailure code="INVALID_TICKET">
+                      Ticket %s not recognized`    
+                   </cas:authenticationFailure>
+                </cas:serviceResponse>
+                """) % xml_escape(ticket)
+            return 'no\n\n'
+
+        d.addCallback(renderSuccess)
+        d.addErrback(renderFailure, request)
+        return d        
 
 
 
@@ -198,9 +278,11 @@ class User(object):
     implements(IUser)
 
     username = None
+    attribs = None
     
-    def __init__(self, username):
+    def __init__(self, username, attribs):
         self.username = username
+        self.attribs = attribs
     
 
 
@@ -211,7 +293,10 @@ class UserRealm(object):
 
 
     def requestAvatar(self, avatarId, mind, *interfaces):
-        return User(avatarId)
+        attribs = [
+            ('email', "%s@lafayette.edu" % avatarId),
+            ('domain', 'lafayette.edu'),]
+        return User(avatarId, attribs)
 
 
 
@@ -289,6 +374,10 @@ class InMemoryTicketStore(object):
             return defer.succeed(val)
         except KeyError:
             return defer.fail(InvalidTicket())
+        except Exception as ex:
+            sys.stderr.write(str(ex))
+            sys.stderr.write("\n")
+            return defer.fail(InvalidTicket())
 
 
     def mkLoginTicket(self, service):
@@ -301,7 +390,7 @@ class InMemoryTicketStore(object):
         def cb(_):
             return self._mkTicket('LT-', {
                 'service': service,
-            })
+            }, _timeout=3600) #Login ticket timeout
         return d.addCallback(cb)
 
 
@@ -320,7 +409,7 @@ class InMemoryTicketStore(object):
         return self._validService(service).addCallback(doit)
 
 
-    def mkServiceTicket(self, username, service):
+    def mkServiceTicket(self, user, service):
         """
         Create a service ticket
 
@@ -328,7 +417,7 @@ class InMemoryTicketStore(object):
         """
         def doit(_):
             return self._mkTicket('ST-', {
-                'username': username,
+                'user': user,
                 'service': service,
             })
         return self._validService(service).addCallback(doit)
@@ -336,36 +425,35 @@ class InMemoryTicketStore(object):
 
     def useServiceTicket(self, ticket, service):
         """
-        Get the username associated with a service ticket.
-
-        XXX
+        Get the user associated with a service ticket.
         """
+        # Q: Should the ticket store additional information that is 
+        # returned besides the username?
         def doit(_):
             data = self._useTicket(ticket)
             def cb(data):
                 if data['service'] != service:
                     raise InvalidTicket()
-                return data['username']
+                return data['user']
             return data.addCallback(cb)
         return self._validService(service).addCallback(doit)
 
 
-    def mkTicketGrantingCookie(self, username):
+    def mkTicketGrantingCookie(self, user):
         """
         Create a ticket to be used in a cookie.
 
         XXX
         """
-        return self._mkTicket('TGC-', username, _timeout=self.cookie_lifespan)
+        return self._mkTicket('TGC-', {'user': user}, _timeout=self.cookie_lifespan)
 
 
     def useTicketGrantingCookie(self, ticket):
         """
-        Get the username associated with this ticket.
-
-        XXX
+        Get the user associated with this ticket.
         """
-        return self._useTicket(ticket, _consume=False)
+        data = self._useTicket(ticket, _consume=False)
+        return data
 
 
 
