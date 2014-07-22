@@ -5,7 +5,7 @@ from zope.interface import implements
 
 from klein import Klein
 
-from txcas.interface import IUser
+from txcas.interface import ICASUser
 
 from urllib import urlencode
 
@@ -79,6 +79,7 @@ class ServerApp(object):
         # the login ticket provided and the service callback.
         self.renderLogin = renderLogin
 
+    #ENHANCEMENT: There should be a /logout endpoint.
 
     @app.route('/login', methods=['GET'])
     def login_GET(self, request):
@@ -180,7 +181,11 @@ class ServerApp(object):
 
         def checkPassword(_, username, password):
             credentials = UsernamePassword(username, password)
-            return self.portal.login(credentials, None, IUser)
+            return self.portal.login(credentials, None, ICASUser)
+
+        def extract_avatar(avatarAspect):
+            interface, avatar, logout = avatarAspect
+            return avatar
 
         def eb(err, service, request):
             query = urlencode({
@@ -192,6 +197,7 @@ class ServerApp(object):
         # check credentials
         d = self.ticket_store.useLoginTicket(ticket, service)
         d.addCallback(checkPassword, username, password)
+        d.addCallback(extract_avatar)
         d.addCallback(self._authenticated, service, request)
         d.addErrback(eb, service, request)
         return d
@@ -255,8 +261,7 @@ class ServerApp(object):
             return '\n'.join(doc_parts)
 
         def renderFailure(err, request):
-            sys.stderr.write(err)
-            sys.stderr.write("\n")
+            err.printTraceback(file=sys.stderr)
             request.setResponseCode(403)
             doc_fail = dedent("""\
                 <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
@@ -265,7 +270,7 @@ class ServerApp(object):
                    </cas:authenticationFailure>
                 </cas:serviceResponse>
                 """) % xml_escape(ticket)
-            return 'no\n\n'
+            return doc_fail
 
         d.addCallback(renderSuccess)
         d.addErrback(renderFailure, request)
@@ -275,7 +280,7 @@ class ServerApp(object):
 
 class User(object):
 
-    implements(IUser)
+    implements(ICASUser)
 
     username = None
     attribs = None
@@ -283,7 +288,9 @@ class User(object):
     def __init__(self, username, attribs):
         self.username = username
         self.attribs = attribs
-    
+   
+    def logout(self):
+        pass 
 
 
 class UserRealm(object):
@@ -293,10 +300,18 @@ class UserRealm(object):
 
 
     def requestAvatar(self, avatarId, mind, *interfaces):
+        """
+        """
+        if not ICASUser in interfaces:
+            raise NotImplementedError("This realm only implements ICASUser.")
         attribs = [
             ('email', "%s@lafayette.edu" % avatarId),
             ('domain', 'lafayette.edu'),]
-        return User(avatarId, attribs)
+        # ENHANCEMENT: This method can also return a deferred that returns
+        # (interface, avatar, logout).  Useful if reading user information
+        # from a database or LDAP directory.
+        avatar = User(avatarId, attribs)
+        return (ICASUser, avatar, avatar.logout)
 
 
 
@@ -453,6 +468,9 @@ class InMemoryTicketStore(object):
         Get the user associated with this ticket.
         """
         data = self._useTicket(ticket, _consume=False)
+        def extract_user(data):
+            return data['user']
+        data.addCallback(extract_user)
         return data
 
 
