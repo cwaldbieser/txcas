@@ -79,6 +79,8 @@ class ServerApp(object):
         # the login ticket provided and the service callback.
         self.renderLogin = renderLogin
 
+    #ENHANCEMENT: There should be a /proxyValidate endpoint.
+    
     #ENHANCEMENT: There should be a /logout endpoint.
 
     @app.route('/login', methods=['GET'])
@@ -99,7 +101,7 @@ class ServerApp(object):
             return defer.fail(CookieAuthFailed("No cookie"))
         # Q: Should the ticket-granting cookie be checked for expiration?
         service = request.args['service'][0]
-        d = self.ticket_store.useTicketGrantingCookie(tgc)
+        d = self.ticket_store.useTicketGrantingCookie(tgc, service)
 
         # XXX untested
         def eb(err, request):
@@ -317,7 +319,7 @@ class UserRealm(object):
 
 class InMemoryTicketStore(object):
     """
-    XXX
+    A ticket store that exists entirely in system memory.
     """
 
     lifespan = 10
@@ -325,12 +327,13 @@ class InMemoryTicketStore(object):
     charset = string.ascii_letters + string.digits + '-'
 
 
-    def __init__(self, reactor=reactor, valid_service=None):
+    def __init__(self, reactor=reactor, valid_service=None, 
+                    is_sso_service=None):
         self.reactor = reactor
         self._tickets = {}
         self._delays = {}
         self.valid_service = valid_service or (lambda x:True)
-
+        self.is_sso_service = is_sso_service or (lambda x: True)
 
     def _validService(self, service):
         def cb(result):
@@ -338,6 +341,11 @@ class InMemoryTicketStore(object):
                 raise InvalidService(service)
         return defer.maybeDeferred(self.valid_service, service).addCallback(cb)
 
+    def _isSSOService(self, service):
+        def cb(result):
+            if not result:
+                raise NotSSOService(service)
+        return defer.maybeDeferred(self.is_sso_service, service).addCallback(cb)
 
     def _generate(self, prefix):
         r = prefix
@@ -398,8 +406,6 @@ class InMemoryTicketStore(object):
     def mkLoginTicket(self, service):
         """
         Create a login ticket.
-
-        XXX
         """
         d = self._validService(service)
         def cb(_):
@@ -463,15 +469,16 @@ class InMemoryTicketStore(object):
         return self._mkTicket('TGC-', {'user': user}, _timeout=self.cookie_lifespan)
 
 
-    def useTicketGrantingCookie(self, ticket):
+    def useTicketGrantingCookie(self, ticket, service):
         """
         Get the user associated with this ticket.
         """
-        data = self._useTicket(ticket, _consume=False)
-        def extract_user(data):
-            return data['user']
-        data.addCallback(extract_user)
-        return data
+        def cb(_): 
+            data = self._useTicket(ticket, _consume=False)
+            def extract_user(data):
+                return data['user']
+            return data.addCallback(extract_user)
+        return self._isSSOService(service).addCallback(cb)
 
 
 
