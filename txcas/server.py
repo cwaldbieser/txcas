@@ -81,8 +81,6 @@ class ServerApp(object):
 
     #ENHANCEMENT: There should be a /proxyValidate endpoint.
     
-    #ENHANCEMENT: There should be a /logout endpoint.
-
     @app.route('/login', methods=['GET'])
     def login_GET(self, request):
         """
