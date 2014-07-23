@@ -135,7 +135,7 @@ class ServerApp(object):
         if not tgc:
             return defer.fail(CookieAuthFailed("No cookie"))
         # Q: Should the ticket-granting cookie be checked for expiration?
-        service = request.args.get('service', [None])[0]
+        service = request.args.get('service', [""])[0]
         d = self.ticket_store.useTicketGrantingCookie(tgc, service)
 
         # XXX untested
@@ -178,29 +178,37 @@ class ServerApp(object):
             request.redirect(service + '?' + query)
 
         d = maybeAddCookie(user, request)
-        if service is not None:
+        if service != "":
             d.addCallback(mkServiceTicket, service)
             return d.addCallback(redirect, service, request)
         else:
             return d.addCallback(self.page_views['login_success'], request)
 
     def _renderLogin(self, ticket, service, request):
-        return '''
+        html_parts = []
+        html_parts.append(dedent('''\
         <html>
             <body>
                 <form method="post" action="">
                     Username: <input type="text" name="username" />
                     <br />Password: <input type="password" name="password" />
                     <input type="hidden" name="lt" value="%(lt)s" />
-                    <input type="hidden" name="service" value="%(service)s" />
+        ''')) % {
+            'lt': cgi.escape(ticket),
+        }
+        if service != "":
+            html_parts.append(
+                '            '
+                '<input type="hidden" name="service" value="%(service)s" />' % {
+                    'service': service
+                })
+        html_parts.append(dedent('''\
                     <input type="submit" value="Sign in" />
                 </form>
             </body>
         </html>
-        ''' % {
-            'lt': cgi.escape(ticket),
-            'service': cgi.escape(service),
-        }
+        '''))
+        return '\n'.join(html_parts)
 
     def _renderLoginSuccess(self, avatar, request):
         html = dedent("""\
@@ -222,7 +230,7 @@ class ServerApp(object):
         Accept a username/password, verify the credentials and redirect them
         appropriately.
         """
-        service = request.args.get('service', [None])[0]
+        service = request.args.get('service', [""])[0]
         username = request.args.get('username', [None])[0]
         password = request.args.get('password', [None])[0]
         ticket = request.args.get('lt', [None])[0]
@@ -236,9 +244,12 @@ class ServerApp(object):
             return avatar
 
         def eb(err, service, request):
-            query = urlencode({
-                'service': service,
-            })
+            if service != "":
+                query = urlencode({
+                    'service': service,
+                })
+            else:
+                query = ""
             request.redirect('/login?' + query)
 
         # check credentials
@@ -517,7 +528,7 @@ class InMemoryTicketStore(object):
             def extract_user(data):
                 return data['user']
             return data.addCallback(extract_user)
-        if service is not None:
+        if service != "":
             return self._isSSOService(service).addCallback(cb)
         else:
             return cb(None)

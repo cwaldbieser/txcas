@@ -15,7 +15,7 @@ def custom_login(ticket, service, request):
         'http://127.0.0.1:9801/landing': 'Cool App #1',
         'http://127.0.0.1:9802/landing': 'Awesome App #2',
     }
-    return dedent('''\
+    top = dedent('''\
         <!DOCTYPE html>
         <html>
             <body>
@@ -24,16 +24,24 @@ def custom_login(ticket, service, request):
                     Username: <input type="text" name="username" />
                     <br />Password: <input type="password" name="password" />
                     <input type="hidden" name="lt" value="%(lt)s" />
-                    <input type="hidden" name="service" value="%(service)s" />
+        ''')
+    middle = '            <input type="hidden" name="service" value="%(service)s" />'
+    bottom = dedent('''\
                     <input type="submit" value="Sign in" />
                 </form>
             </body>
         </html>
-        ''') % {
-            'lt': cgi.escape(ticket),
-            'service': cgi.escape(service),
-            'service_name': cgi.escape(service_lookup.get(service, "SSO Login"))
-        }
+        ''') 
+    parts = [top]
+    if service != "":
+        parts.append(middle)
+    parts.append(bottom)
+    template = '\n'.join(parts)    
+    return template % {
+        'lt': cgi.escape(ticket),
+        'service': cgi.escape(service),
+        'service_name': cgi.escape(service_lookup.get(service, "SSO Login"))
+    }
 
 class MyApp(object):
 
