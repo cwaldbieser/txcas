@@ -122,6 +122,10 @@ class ServerApp(object):
         """
         Present a username/password login page to the browser.
         """
+        renew = request.args.get('renew', [""])[0]
+        if renew != "":
+            return self._presentLogin(request)
+            
         d = self._authenticateByCookie(request)
         d.addErrback(lambda _:self._presentLogin(request))
         def eb(err, request):
@@ -147,12 +151,31 @@ class ServerApp(object):
         d.addErrback(eb, request)
         return d.addCallback(self._authenticated, service, request)
 
-
     def _presentLogin(self, request):
+        # If the login is presented, the TGC should be removed and the TGT
+        # should be expired.
+        def expireTGT():
+            tgc = request.getCookie(self.cookie_name)
+            if tgc:
+                #Delete the cookie.
+                request.addCookie(
+                    self.cookie_name, '', expires='Thu, 01 Jan 1970 00:00:00 GMT')
+                #Expire the ticket.
+                d = self.ticket_store.expireTGT(tgc)
+                return d
+            return None
         service = request.args.get('service', [""])[0]
-        d = self.ticket_store.mkLoginTicket(service)
-        return d.addCallback(self.page_views['login'], service, request)
-
+        gateway = request.args.get('gateway', [""])[0]
+        if gateway != "" and service != "":
+            #Redirect to `service` with no ticket.
+            request.redirect(service)            
+            request.finish()
+            return
+        return defer.maybeDeferred(
+            expireTGT).addCallback(
+            lambda x: service).addCallback(
+            self.ticket_store.mkLoginTicket).addCallback(
+            self.page_views['login'], service, request)
 
     def _authenticated(self, user, service, request):
         """
@@ -231,6 +254,7 @@ class ServerApp(object):
         appropriately.
         """
         service = request.args.get('service', [""])[0]
+        renew = request.args.get('renew', [""])[0]
         username = request.args.get('username', [None])[0]
         password = request.args.get('password', [None])[0]
         ticket = request.args.get('lt', [None])[0]
@@ -244,12 +268,11 @@ class ServerApp(object):
             return avatar
 
         def eb(err, service, request):
-            if service != "":
-                query = urlencode({
-                    'service': service,
-                })
-            else:
-                query = ""
+            params = {}
+            for argname, arglist in request.args.iteritems():
+                if argname in ('service', 'renew',):
+                    params[argname] = arglist
+            query = urlencode(params, doseq=True)
             request.redirect('/login?' + query)
 
         # check credentials
@@ -475,6 +498,8 @@ class InMemoryTicketStore(object):
         """
         Use a login ticket.
         """
+        if not ticket.startswith("LT-"):
+            raise InvalidTicket()
         def doit(_):
             data = self._useTicket(ticket)
             def cb(data):
@@ -500,6 +525,8 @@ class InMemoryTicketStore(object):
         """
         Get the user associated with a service ticket.
         """
+        if not ticket.startswith("ST-"):
+            raise InvalidTicket()
         def doit(_):
             data = self._useTicket(ticket)
             def cb(data):
@@ -533,7 +560,23 @@ class InMemoryTicketStore(object):
         else:
             return cb(None)
 
+    def expireTGT(self, ticket):
+        """
+        Expire the TGT identified by 'ticket'.
+        """
+        if not ticket.startswith("TGC-"):
+            raise InvalidTicket()
+        
+        d = self._useTicket(ticket)
+        def cb(_):
+            """
+            Remove any returned data from the ticket.
+            """
+            return None
+        def eb(failure):
+            failure.trap(InvalidTicket)
 
+        return d.addCallback(cb).addErrback(eb)
 
 
 
