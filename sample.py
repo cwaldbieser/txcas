@@ -1,9 +1,39 @@
 SERVER_PATH='cas'
 
+import cgi
+from textwrap import dedent
+
 # app
 from klein import Klein
 from twisted.web.client import getPage
 from urllib import urlencode
+
+def custom_login(ticket, service, request):
+    """
+    """
+    service_lookup = {
+        'http://127.0.0.1:9801/landing': 'Cool App #1',
+        'http://127.0.0.1:9802/landing': 'Awesome App #2',
+    }
+    return dedent('''\
+        <!DOCTYPE html>
+        <html>
+            <body>
+                <h1>CAS Login - %(service_name)s</h1>
+                <form method="post" action="">
+                    Username: <input type="text" name="username" />
+                    <br />Password: <input type="password" name="password" />
+                    <input type="hidden" name="lt" value="%(lt)s" />
+                    <input type="hidden" name="service" value="%(service)s" />
+                    <input type="submit" value="Sign in" />
+                </form>
+            </body>
+        </html>
+        ''') % {
+            'lt': cgi.escape(ticket),
+            'service': cgi.escape(service),
+            'service_name': cgi.escape(service_lookup.get(service, "SSO Login"))
+        }
 
 class MyApp(object):
 
@@ -79,9 +109,10 @@ from txcas.server import ServerApp, InMemoryTicketStore, UserRealm
 
 checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
 
-
+page_views = {'login': custom_login}
+#page_views = None
 server_app = ServerApp(InMemoryTicketStore(), UserRealm(), [checker], lambda x:True,
-                       requireSSL=False)
+                       requireSSL=False, page_views=page_views)
 
 
 # combines server/app

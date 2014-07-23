@@ -18,6 +18,18 @@ from textwrap import dedent
 import sys
 
 
+html_escape_table = {
+    "&": "&amp;",
+    '"': "&quot;",
+    "'": "&apos;",
+    ">": "&gt;",
+    "<": "&lt;",
+    }
+
+def escape_html(text):
+    """Produce entities within text."""
+    return "".join(html_escape_table.get(c,c) for c in text)
+
 def make_cas_attributes(attribs):
     """
     Create CAS attributes from a list of (key, value) tuples.
@@ -66,18 +78,42 @@ class ServerApp(object):
 
     
     def __init__(self, ticket_store, realm, checkers, validService=None,
-                 requireSSL=True, renderLogin=None):
+                 requireSSL=True, page_views=None):
+        """
+        Initialize an instance of the CAS server.
+
+        @param ticket_store: The ticket store to use.
+        @param realm: The t.c.p.Portal asks the realm for an avatar.
+        @param checkers: A list of credential checkers to try (in order).
+        @param validService: A callable that takes a service as an argument 
+            and returns True if the server will authenticate for that service.
+        @param requireSSL: Require SSL for Tcket Granting Cookie
+        @param page_views: A mapping of functions that are used to render
+            custom pages.
+            - login: rendered when credentials are requested.
+                - Should accept args (loginTicket, service, request).
+                - Rendered page should POST to /login according to CAS protocol.
+            - login_success: Rendered when no service is specified and a
+                valid SSO session already exists.
+            - Should accept args (avatar, request) 
+        """
         self.cookies = {}
         self.ticket_store = ticket_store
         self.portal = Portal(realm)
         self.requireSSL = requireSSL
         map(self.portal.registerChecker, checkers)
         self.validService = validService or (lambda x: True)
-        # ENHANCEMENT: A function to allow you to render your own
-        # custom login page.  Should accept (loginTicket, service).
-        # The rendered page should POST to /login and should include 
-        # the login ticket provided and the service callback.
-        self.renderLogin = renderLogin
+
+        default_page_views = {
+                'login': self._renderLogin,
+                'login_success': self._renderLoginSuccess,
+            }
+        if page_views is None:
+            page_views = default_page_views
+        else:
+            default_page_views.update(page_views)
+            page_views = default_page_views
+        self.page_views = page_views
 
     #ENHANCEMENT: There should be a /proxyValidate endpoint.
     
@@ -88,7 +124,8 @@ class ServerApp(object):
         """
         d = self._authenticateByCookie(request)
         d.addErrback(lambda _:self._presentLogin(request))
-        def eb(r, request):
+        def eb(err, request):
+            err.printTraceback(file=sys.stderr)
             request.setResponseCode(400)
         return d.addErrback(eb, request)
 
@@ -98,7 +135,7 @@ class ServerApp(object):
         if not tgc:
             return defer.fail(CookieAuthFailed("No cookie"))
         # Q: Should the ticket-granting cookie be checked for expiration?
-        service = request.args['service'][0]
+        service = request.args.get('service', [None])[0]
         d = self.ticket_store.useTicketGrantingCookie(tgc, service)
 
         # XXX untested
@@ -112,32 +149,9 @@ class ServerApp(object):
 
 
     def _presentLogin(self, request):
-        # ENHANCEMENT Login page should be customizable.
-        # - Below, `render()` could be a default, but the server should
-        # allow you to provide your own `render(login_ticket, service)`
-        # that allows you to render your own page.
-        # - Any additional information to the custom `render()` could be
-        # provided by class state or a closure, for example.
-        service = request.args['service'][0]
+        service = request.args.get('service', [""])[0]
         d = self.ticket_store.mkLoginTicket(service)
-        def render(ticket, service):
-            return '''
-            <html>
-                <body>
-                    <form method="post" action="">
-                        Username: <input type="text" name="username" />
-                        <br />Password: <input type="password" name="password" />
-                        <input type="hidden" name="lt" value="%(lt)s" />
-                        <input type="hidden" name="service" value="%(service)s" />
-                        <input type="submit" value="Sign in" />
-                    </form>
-                </body>
-            </html>
-            ''' % {
-                'lt': cgi.escape(ticket),
-                'service': cgi.escape(service),
-            }
-        return d.addCallback(render, service)
+        return d.addCallback(self.page_views['login'], service, request)
 
 
     def _authenticated(self, user, service, request):
@@ -164,9 +178,43 @@ class ServerApp(object):
             request.redirect(service + '?' + query)
 
         d = maybeAddCookie(user, request)
-        d.addCallback(mkServiceTicket, service)
-        return d.addCallback(redirect, service, request)
+        if service is not None:
+            d.addCallback(mkServiceTicket, service)
+            return d.addCallback(redirect, service, request)
+        else:
+            return d.addCallback(self.page_views['login_success'], request)
 
+    def _renderLogin(self, ticket, service, request):
+        return '''
+        <html>
+            <body>
+                <form method="post" action="">
+                    Username: <input type="text" name="username" />
+                    <br />Password: <input type="password" name="password" />
+                    <input type="hidden" name="lt" value="%(lt)s" />
+                    <input type="hidden" name="service" value="%(service)s" />
+                    <input type="submit" value="Sign in" />
+                </form>
+            </body>
+        </html>
+        ''' % {
+            'lt': cgi.escape(ticket),
+            'service': cgi.escape(service),
+        }
+
+    def _renderLoginSuccess(self, avatar, request):
+        html = dedent("""\
+            <html>
+                <body>
+                    <h1>A CAS Session Exists</h1>
+                    <p>
+                        A CAS session exists for account '%s'.
+                    </p>
+                </body>
+            </html>
+            """) % escape_html(avatar.username)
+        return html
+        
 
     @app.route('/login', methods=['POST'])
     def login_POST(self, request):
@@ -174,10 +222,10 @@ class ServerApp(object):
         Accept a username/password, verify the credentials and redirect them
         appropriately.
         """
-        service = request.args['service'][0]
-        username = request.args['username'][0]
-        password = request.args['password'][0]
-        ticket = request.args['lt'][0]
+        service = request.args.get('service', [None])[0]
+        username = request.args.get('username', [None])[0]
+        password = request.args.get('password', [None])[0]
+        ticket = request.args.get('lt', [None])[0]
 
         def checkPassword(_, username, password):
             credentials = UsernamePassword(username, password)
@@ -192,7 +240,6 @@ class ServerApp(object):
                 'service': service,
             })
             request.redirect('/login?' + query)
-            request.setResponseCode(403)
 
         # check credentials
         d = self.ticket_store.useLoginTicket(ticket, service)
@@ -416,8 +463,6 @@ class InMemoryTicketStore(object):
     def useLoginTicket(self, ticket, service):
         """
         Use a login ticket.
-
-        XXX
         """
         def doit(_):
             data = self._useTicket(ticket)
@@ -431,8 +476,6 @@ class InMemoryTicketStore(object):
     def mkServiceTicket(self, user, service):
         """
         Create a service ticket
-
-        XXX
         """
         def doit(_):
             return self._mkTicket('ST-', {
@@ -446,8 +489,6 @@ class InMemoryTicketStore(object):
         """
         Get the user associated with a service ticket.
         """
-        # Q: Should the ticket store additional information that is 
-        # returned besides the username?
         def doit(_):
             data = self._useTicket(ticket)
             def cb(data):
@@ -476,7 +517,10 @@ class InMemoryTicketStore(object):
             def extract_user(data):
                 return data['user']
             return data.addCallback(extract_user)
-        return self._isSSOService(service).addCallback(cb)
+        if service is not None:
+            return self._isSSOService(service).addCallback(cb)
+        else:
+            return cb(None)
 
 
 
