@@ -107,6 +107,7 @@ class ServerApp(object):
         default_page_views = {
                 'login': self._renderLogin,
                 'login_success': self._renderLoginSuccess,
+                'logout': self._renderLogout,
             }
         if page_views is None:
             page_views = default_page_views
@@ -139,6 +140,8 @@ class ServerApp(object):
         if not tgc:
             return defer.fail(CookieAuthFailed("No cookie"))
         # Q: Should the ticket-granting cookie be checked for expiration?
+        # I think a browser won't send expired cookies.  Anyway, expiration
+        # should happen on the server.
         service = request.args.get('service', [""])[0]
         d = self.ticket_store.useTicketGrantingCookie(tgc, service)
 
@@ -246,6 +249,8 @@ class ServerApp(object):
             """) % escape_html(avatar.username)
         return html
         
+    def _renderLogout(self, request):
+        return "You have been logged out."
 
     @app.route('/login', methods=['POST'])
     def login_POST(self, request):
@@ -287,10 +292,22 @@ class ServerApp(object):
     @app.route('/logout', methods=['GET'])
     def logout_GET(self, request):
         tgc = request.getCookie(self.cookie_name)
-        self.ticket_store.expireTicket(tgc)
-        request.addCookie(self.cookie_name, '',
-                          expires='Thu, 01 Jan 1970 00:00:00 GMT')
-        return 'You have been logged out'
+        if tgc:
+            #Delete the cookie.
+            request.addCookie(
+                self.cookie_name, '', expires='Thu, 01 Jan 1970 00:00:00 GMT')
+            #Expire the ticket.
+            d = self.ticket_store.expireTGT(tgc)
+            service = request.args.get('service', [""])[0]
+            if service != "":
+                def redirect(_):
+                    request.redirect(service)
+                d.addCallback(redirect)
+            else:
+                d.addCallback(self.page_views['logout'])
+            return d
+            
+        return self.page_views['logout']
 
 
     @app.route('/validate', methods=['GET'])
@@ -298,8 +315,12 @@ class ServerApp(object):
         """
         Validate a service ticket, consuming the ticket in the process.
         """
-        ticket = request.args['ticket'][0]
-        service = request.args['service'][0]
+        ticket = request.args.get('ticket', [""])[0]
+        service = request.args.get('service', [""])[0]
+        if service == "" or ticket == "":
+            request.setResponseCode(403)
+            return 'no\n\n'
+
         d = self.ticket_store.useServiceTicket(ticket, service)
 
         def renderUsername(user):
