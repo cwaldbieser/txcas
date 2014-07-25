@@ -1,12 +1,20 @@
+
+
 SERVER_PATH='cas'
 
+#Standard library
 import cgi
 from textwrap import dedent
-
-# app
-from klein import Klein
-from twisted.web.client import getPage
 from urllib import urlencode
+
+#Application modules
+from txcas.server import escape_html
+
+# External modules
+from klein import Klein
+from twisted.web import microdom
+from twisted.web.client import getPage
+
 
 def custom_login(ticket, service, request):
     """
@@ -14,6 +22,7 @@ def custom_login(ticket, service, request):
     service_lookup = {
         'http://127.0.0.1:9801/landing': 'Cool App #1',
         'http://127.0.0.1:9802/landing': 'Awesome App #2',
+        'http://127.0.0.1:9803/landing': 'Super Secure App #3',
     }
     top = dedent('''\
         <!DOCTYPE html>
@@ -48,9 +57,12 @@ class MyApp(object):
     app = Klein()
 
 
-    def __init__(self, color, cas_root):
+    def __init__(self, color, cas_root, allow_sso=True, act_as_proxy=False):
         self.color = color
         self.cas_root = cas_root
+        self.allow_sso = allow_sso
+        self.act_as_proxy = act_as_proxy
+        self._ious = {}
 
     @app.route('/')
     def index(self, request):
@@ -71,8 +83,9 @@ class MyApp(object):
             'color': self.color,
         }
 
-    @app.route('/landing')
-    def landing(self, request):
+    @app.route('/landing', methods=['GET'])
+    def landing_GET(self, request):
+        log.msg("landing_GET()")
         try:
             ticket = request.args['ticket'][0]
         except (KeyError, IndexError):
@@ -81,35 +94,88 @@ class MyApp(object):
             return 'Invalid login attempt'
 
         url = self.cas_root + '/serviceValidate'
-        params = urlencode({
+        q = {
             'service': str(request.URLPath()),
             'ticket': ticket,
-        })
+        }
+        if not self.allow_sso:
+            q['renew'] = True
+        if self.act_as_proxy:
+            if request.isSecure():
+                scheme = "https://"
+            else:
+                scheme = "http://"
+            host = request.getHost()
+            netloc = "%s:%d" % (host.host, host.port)
+            q['pgtUrl'] = scheme + netloc + '/proxycb'
+        params = urlencode(q)
         url += '?' + params
-        print params
 
         d = getPage(url)
         def gotResponse(response):
-            print response
-            if response.find("<cas:authenticationSuccess>") != -1:
+            log.msg("gotResponse()")
+            log.msg(response)
+            doc = microdom.parseString(response)
+            elms = doc.getElementsByTagName("cas:authenticationSuccess")
+            log.msg(elms)
+            valid = False
+            pgt = None
+            if len(elms) > 0:
                 valid = True
-                for line in response.split("\n"):
-                    line = line.strip()
-                    if line.startswith("<cas:user>"):
-                        username = line[10:-11]
-                        break
+                elms = doc.getElementsByTagName("cas:user")
+                if len(elms) > 0:
+                    elm = elms[0]
+                    username = elm.childNodes[0].value
+                elms = doc.getElementsByTagName("cas:proxyGrantingTicket")
+                if len(elms) > 0:
+                    elm = elms[0]
+                    iou = elm.childNodes[0].value
+                    pgt = None
+                    if iou in self._ious:
+                        pgt = self._ious[iou]
+                        del self._ious[iou] 
+                    else:
+                        log.error("Could not corrolate PGTIOU '%s'." % iou)
             if not valid:
                 raise Exception('Invalid login')
             session = request.getSession()
             session.username = username
+            if pgt is not None:
+                session.pgt = pgt
+                log.msg("PGT added to session '%s'." % pgt)
             request.redirect(request.URLPath().sibling('').path)    
 
         def eb(err):
+            log.msg("eb()")
             log.msg('error: %s' % (err,))
             return 'Invalid login attempt'
 
         return d.addCallback(gotResponse).addErrback(eb)
         
+    @app.route('/landing', methods=['POST'])
+    def landing_POST(self, request):
+        doc = microdom.parseString(request.content.read())
+        elms = doc.getElementsByTagName("samlp:SessionIndex")
+        if len(elms) > 0:
+            elm = elms[0]
+            st = elm.childNodes[0].value
+            log.msg("Received POST SLO with Session Index '%s'." % st)
+
+    @app.route('/proxycb', methods=['GET'])
+    def proxycb_GET(self, request):
+        pgtId = request.args.get('pgtId', [None])[0]
+        pgtIou = request.args.get('pgtIou', [None])[0]
+        if (pgtId is not None) and (pgtIou is not None):
+            self._ious[pgtIou] = pgtId
+        return "OK"
+
+    @app.route('/pgtinfo', methods=['GET'])
+    def pgtinfo_GET(self, request):
+        session = request.getSession()
+        if hasattr(session, 'pgt'):
+            return "PGT == %s" % escape_html(session.pgt)
+        else:
+            return "No PGT"
 
 # server
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
@@ -139,8 +205,12 @@ app1 = MyApp('#acf', 'http://127.0.0.1:9800')
 reactor.listenTCP(9801, Site(app1.app.resource()))
 
 # app 2
-app2 = MyApp('#cfc', 'http://127.0.0.1:9800')
+app2 = MyApp('#cfc', 'http://127.0.0.1:9800', act_as_proxy=True)
 reactor.listenTCP(9802, Site(app2.app.resource()))
+
+# app 3
+app3 = MyApp('#abc', 'http://127.0.0.1:9800', allow_sso=False)
+reactor.listenTCP(9803, Site(app3.app.resource()))
 
 reactor.run()
 

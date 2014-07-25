@@ -1,22 +1,32 @@
+
+
+#Standard library
+import cgi
+import datetime
+import random
+import string
+import sys
+from textwrap import dedent
+from urllib import urlencode
+import uuid
+from xml.sax.saxutils import escape as xml_escape
+
+#Application modules
+from txcas.interface import ICASUser
+
+#External modules
+from klein import Klein
+
+import treq
+
 from twisted.cred.portal import Portal, IRealm
 from twisted.cred.credentials import UsernamePassword
 from twisted.internet import defer, reactor
 from zope.interface import implements
+from twisted.python import log
 
-from klein import Klein
 
-from txcas.interface import ICASUser
-
-from urllib import urlencode
-
-import uuid
-import random
-import string
-import cgi
-from xml.sax.saxutils import escape as xml_escape
-from textwrap import dedent
-import sys
-
+#=======================================================================
 
 html_escape_table = {
     "&": "&amp;",
@@ -58,17 +68,22 @@ def sanitize_keyname(name):
     s = ''.join(ch for ch in name if ch in include)
     return s
 
-class InvalidTicket(Exception):
+class CASError(Exception):
+    pass
+
+class InvalidTicket(CASError):
     pass
 
 
-class InvalidService(Exception):
+class InvalidService(CASError):
     pass
 
 
-class CookieAuthFailed(Exception):
+class CookieAuthFailed(CASError):
     pass
 
+class NotSSOService(CASError):
+    pass
 
 
 class ServerApp(object):
@@ -78,7 +93,7 @@ class ServerApp(object):
 
     
     def __init__(self, ticket_store, realm, checkers, validService=None,
-                 requireSSL=True, page_views=None):
+                 requireSSL=True, page_views=None, validate_pgturl=True):
         """
         Initialize an instance of the CAS server.
 
@@ -90,12 +105,24 @@ class ServerApp(object):
         @param requireSSL: Require SSL for Tcket Granting Cookie
         @param page_views: A mapping of functions that are used to render
             custom pages.
-            - login: rendered when credentials are requested.
-                - Should accept args (loginTicket, service, request).
-                - Rendered page should POST to /login according to CAS protocol.
-            - login_success: Rendered when no service is specified and a
-                valid SSO session already exists.
-            - Should accept args (avatar, request) 
+            - All views may either be synchronous or async (deferreds).
+            - List of views:
+                - login: rendered when credentials are requested.
+                    - Should accept args (loginTicket, service, request).
+                    - Rendered page should POST to /login according to CAS protocol.
+                - login_success: Rendered when no service is specified and a
+                    valid SSO session already exists.
+                    - Should accept args (avatar, request)
+                - logout: Rendered on logout.
+                    - Should accept args (request,).
+                - invalid_service: Rendered when an invalid service is provided.
+                    - Should accept args (service, request).
+                - error5xx: Rendered on an internal error.
+                    - Should accept args (err, request).
+                    - `err` is a twisted.python.failure.Failure
+        @param validate_pgturl: If True, follow the protocol and validate the pgtUrl
+            peer.  Useful to set to False for development purposes.
+                 
         """
         self.cookies = {}
         self.ticket_store = ticket_store
@@ -103,11 +130,14 @@ class ServerApp(object):
         self.requireSSL = requireSSL
         map(self.portal.registerChecker, checkers)
         self.validService = validService or (lambda x: True)
+        self.validate_pgturl = validate_pgturl
 
         default_page_views = {
                 'login': self._renderLogin,
                 'login_success': self._renderLoginSuccess,
                 'logout': self._renderLogout,
+                'invalid_service': self._renderInvalidService,
+                'error5xx': self._renderError5xx,
             }
         if page_views is None:
             page_views = default_page_views
@@ -123,16 +153,21 @@ class ServerApp(object):
         """
         Present a username/password login page to the browser.
         """
+        service = request.args.get('service', [""])[0]
         renew = request.args.get('renew', [""])[0]
         if renew != "":
             return self._presentLogin(request)
             
         d = self._authenticateByCookie(request)
         d.addErrback(lambda _:self._presentLogin(request))
-        def eb(err, request):
+        def service_err(err, request):
+            err.trap(InvalidService)
             err.printTraceback(file=sys.stderr)
-            request.setResponseCode(400)
-        return d.addErrback(eb, request)
+            request.setResponseCode(403)
+            return defer.maybeDeferred(
+                self.page_views['invalid_service'], service, request)
+        d.addErrback(service_err, request)
+        return d.addErrback(self.page_views['error5xx'], request)
 
 
     def _authenticateByCookie(self, request):
@@ -145,14 +180,14 @@ class ServerApp(object):
         service = request.args.get('service', [""])[0]
         d = self.ticket_store.useTicketGrantingCookie(tgc, service)
 
-        # XXX untested
         def eb(err, request):
+            err.trap(InvalidTicket, NotSSOService)
             # delete the cookie
             request.addCookie(self.cookie_name, '',
                               expires='Thu, 01 Jan 1970 00:00:00 GMT')
             return err
         d.addErrback(eb, request)
-        return d.addCallback(self._authenticated, service, request)
+        return d.addCallback(self._authenticated, False, service, request)
 
     def _presentLogin(self, request):
         # If the login is presented, the TGC should be removed and the TGT
@@ -179,23 +214,28 @@ class ServerApp(object):
             lambda x: service).addCallback(
             self.ticket_store.mkLoginTicket).addCallback(
             self.page_views['login'], service, request)
+            
 
-    def _authenticated(self, user, service, request):
+    def _authenticated(self, user, primaryCredentials, service, request):
         """
         Call this after authentication has succeeded to finish the request.
         """
+        tgc = request.getCookie(self.cookie_name)
+        
         @defer.inlineCallbacks
         def maybeAddCookie(user, request):
-            if not request.getCookie(self.cookie_name):
+            ticket = request.getCookie(self.cookie_name)
+            if not ticket:
                 path = request.URLPath().sibling('').path
                 ticket = yield self.ticket_store.mkTicketGrantingCookie(user)
                 request.addCookie(self.cookie_name, ticket, path=path,
                                   secure=self.requireSSL)
                 request.cookies[-1] += '; HttpOnly'
-            defer.returnValue(user)
+            defer.returnValue((user, ticket))
 
-        def mkServiceTicket(user, service):
-            return self.ticket_store.mkServiceTicket(user, service)
+        def mkServiceTicket(user_tgc, service, tgc):
+            user, tgc = user_tgc
+            return self.ticket_store.mkServiceTicket(user, service, tgc, primaryCredentials)
 
         def redirect(ticket, service, request):
             query = urlencode({
@@ -205,10 +245,11 @@ class ServerApp(object):
 
         d = maybeAddCookie(user, request)
         if service != "":
-            d.addCallback(mkServiceTicket, service)
-            return d.addCallback(redirect, service, request)
+            d.addCallback(mkServiceTicket, service, tgc)
+            d.addCallback(redirect, service, request)
         else:
-            return d.addCallback(self.page_views['login_success'], request)
+            d.addCallback(self.page_views['login_success'], request)
+        return d.addErrback(self.page_views['error5xx'], request)
 
     def _renderLogin(self, ticket, service, request):
         html_parts = []
@@ -251,6 +292,42 @@ class ServerApp(object):
         
     def _renderLogout(self, request):
         return "You have been logged out."
+        
+    def _renderInvalidService(self, service, request):
+        html = dedent("""\
+            <html>
+                <head>
+                    <title>Invalid Service</title>
+                </head>
+                <body>
+                    <h1>Invalid Service</h1>
+                    <p>
+                        The service provided is not authorized to use this CAS
+                        implementation.
+                    </p>
+                </body>
+            </html>
+            """)
+        request.setResponseCode(403)
+        return html
+        
+    def _renderError5xx(self, err, request):
+        err.printTraceback(file=sys.stderr)
+        html = dedent("""\
+            <html>
+                <head>
+                    <title>Internal Error - 500</title>
+                </head>
+                <body>
+                    <h1>HTTP 500 - Internal Error</h1>
+                    <p>
+                        Please contact your system administrator.
+                    </p>
+                </body>
+            </html>
+            """)
+        request.setResponseCode(500)
+        return html
 
     @app.route('/login', methods=['POST'])
     def login_POST(self, request):
@@ -273,6 +350,12 @@ class ServerApp(object):
             return avatar
 
         def eb(err, service, request):
+            # ENHANCEMENT: It would be much better if this errorback 
+            # could trap something like an "AuthError" and throw other
+            # errors to the 5xx handler.
+            # I am not sure what kind of errors the credentail checkers
+            # will raise, though.
+            err.printTraceback(file=sys.stderr)
             params = {}
             for argname, arglist in request.args.iteritems():
                 if argname in ('service', 'renew',):
@@ -284,13 +367,22 @@ class ServerApp(object):
         d = self.ticket_store.useLoginTicket(ticket, service)
         d.addCallback(checkPassword, username, password)
         d.addCallback(extract_avatar)
-        d.addCallback(self._authenticated, service, request)
+        d.addCallback(self._authenticated, True, service, request)
         d.addErrback(eb, service, request)
         return d
 
 
     @app.route('/logout', methods=['GET'])
     def logout_GET(self, request):
+        service = request.args.get('service', [""])[0]
+        def _validService(_, service):
+            def eb(err):
+                err.trap(InvalidService)
+                return defer.maybeDeferred(
+                    self.page_views['invalid_service'], service, request)
+            return defer.maybeDeferred(
+                self.validService, service).addErrback(eb)
+                
         tgc = request.getCookie(self.cookie_name)
         if tgc:
             #Delete the cookie.
@@ -298,16 +390,22 @@ class ServerApp(object):
                 self.cookie_name, '', expires='Thu, 01 Jan 1970 00:00:00 GMT')
             #Expire the ticket.
             d = self.ticket_store.expireTGT(tgc)
-            service = request.args.get('service', [""])[0]
-            if service != "":
-                def redirect(_):
-                    request.redirect(service)
-                d.addCallback(redirect)
-            else:
-                d.addCallback(self.page_views['logout'])
-            return d
-            
-        return self.page_views['logout']
+        else:
+            d = defer.maybeDeferred(lambda : None)
+
+        if service != "":
+            def redirect(_):
+                request.redirect(service)
+            d.addCallback(
+                _validService, service).addCallback(
+                redirect).addErrback(
+                self.page_views['error5xx'], request)
+        else:
+            d.addCallback(
+                self.page_views['logout']).addErrback(
+                self.page_views['error5xx'], request)
+
+        return d
 
 
     @app.route('/validate', methods=['GET'])
@@ -317,21 +415,28 @@ class ServerApp(object):
         """
         ticket = request.args.get('ticket', [""])[0]
         service = request.args.get('service', [""])[0]
+        renew = request.args.get('renew', [""])[0]
         if service == "" or ticket == "":
             request.setResponseCode(403)
             return 'no\n\n'
 
-        d = self.ticket_store.useServiceTicket(ticket, service)
+        if renew != "":
+            require_pc = True
+        else:
+            require_pc = False        
+        d = self.ticket_store.useServiceTicket(ticket, service, require_pc)
 
         def renderUsername(user):
             return 'yes\n' + user.username + '\n'
 
         def renderFailure(err, request):
+            err.trap(InvalidTicket)
             request.setResponseCode(403)
             return 'no\n\n'
 
         d.addCallback(renderUsername)
         d.addErrback(renderFailure, request)
+        d.addErrback(self.page_views['error5xx'], request)
         return d        
 
     @app.route('/serviceValidate', methods=['GET'])
@@ -339,11 +444,25 @@ class ServerApp(object):
         """
         Validate a service ticket, consuming the ticket in the process.
         """
-        ticket = request.args['ticket'][0]
-        service = request.args['service'][0]
-        d = self.ticket_store.useServiceTicket(ticket, service)
+        ticket = request.args.get('ticket', [None])[0]
+        service = request.args.get('service', [None])[0]
+        pgturl = request.args.get('pgtUrl', [""])[0]
+        renew = request.args.get('renew', [""])[0]
+        
+        if service is None or ticket is None:
+            request.setResponseCode(400)
+            return "Bad request"
+        
+        if renew != "":
+            require_pc = True
+        else:
+            require_pc = False
+        d = self.ticket_store.useServiceTicket(ticket, service, require_pc)
 
-        def renderSuccess(avatar):
+        def renderSuccess(results):
+            avatar = results['avatar']
+            iou = results.get('iou', None)
+            
             doc_begin = dedent("""\
                 <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
                     <cas:authenticationSuccess>
@@ -351,6 +470,9 @@ class ServerApp(object):
                 """) % xml_escape(avatar.username)
             doc_attributes = make_cas_attributes(avatar.attribs)
             doc_proxy = ""
+            if iou is not None:
+                doc_proxy = "    <cas:proxyGrantingTicket>%s</cas:proxyGrantingTicket>" % (
+                    xml_escape(iou))
             doc_end = dedent("""\
                     </cas:authenticationSuccess>
                 </cas:serviceResponse>
@@ -363,7 +485,7 @@ class ServerApp(object):
             return '\n'.join(doc_parts)
 
         def renderFailure(err, request):
-            err.printTraceback(file=sys.stderr)
+            err.trap(InvalidTicket)
             request.setResponseCode(403)
             doc_fail = dedent("""\
                 <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
@@ -374,11 +496,52 @@ class ServerApp(object):
                 """) % xml_escape(ticket)
             return doc_fail
 
+        d.addCallback(self._validateProxy, pgturl, service, ticket, request)
         d.addCallback(renderSuccess)
         d.addErrback(renderFailure, request)
+        d.addErrback(self.page_views['error5xx'], request)
         return d        
 
-
+    def _validateProxy(self, avatar, pgturl, service, ticket, request):
+        """
+        Validate service callback.
+        Generate PGT + IOU.
+        POST both to pgturl.
+        Return avatar *and* IOU.
+        """
+        results = {'avatar': avatar}
+        if pgturl == "":
+            return results
+        
+        def _mkPGT(_):
+            return self.ticket_store.mkProxyGrantingTicket(avatar, service, ticket)
+        
+        def _sendTicketAndIou(pgt_info, pgturl):
+            """
+            """
+            pgt = pgt_info['pgt']
+            iou = pgt_info['iou']
+            def iou_cb(_, pgtiou):
+                """
+                Return the iou parameter.
+                """
+                return pgtiou
+                
+            q = {'pgtId': pgt, 'pgtIou': iou}
+            return treq.get(pgturl + '?' + urlencode(q)).addCallback(iou_cb, iou)
+            
+        def _package_result(iou, avatar):
+            d = {'iou': iou, 'avatar': avatar}
+            return d
+        
+        if self.validate_pgturl:
+            d = treq.get(pgturl)
+        else:
+            d = defer.Deferred()
+        d.addCallback(_mkPGT)
+        d.addCallback(_sendTicketAndIou, pgturl)
+        d.addCallback(_package_result, avatar)
+        return d
 
 class User(object):
 
@@ -435,10 +598,14 @@ class InMemoryTicketStore(object):
         self.valid_service = valid_service or (lambda x:True)
         self.is_sso_service = is_sso_service or (lambda x: True)
 
+    def debug(self, msg):
+        log.msg(msg)
+
     def _validService(self, service):
         def cb(result):
             if not result:
                 raise InvalidService(service)
+            return service
         return defer.maybeDeferred(self.valid_service, service).addCallback(cb)
 
     def _isSSOService(self, service):
@@ -467,6 +634,7 @@ class InMemoryTicketStore(object):
         timeout = _timeout or self.lifespan
         ticket = self._generate(prefix)
         self._tickets[ticket] = data
+        self.debug("Added ticket '%s' with data: %s" % (ticket, str(data)))
         dc = self.reactor.callLater(timeout, self.expireTicket, ticket)
         self._delays[ticket] = (dc, timeout)
         return defer.succeed(ticket)
@@ -478,6 +646,7 @@ class InMemoryTicketStore(object):
             del self._delays[val]
         except KeyError:
             pass
+        self.debug("Expired ticket '%s'." % val)
 
 
     def _useTicket(self, ticket, _consume=True):
@@ -491,6 +660,7 @@ class InMemoryTicketStore(object):
             val = self._tickets[ticket]
             if _consume:
                 del self._tickets[ticket]
+                self.debug("Consumed ticket '%s'." % ticket)
             else:
                 dc, timeout = self._delays[ticket]
                 dc.reset(timeout)
@@ -502,6 +672,18 @@ class InMemoryTicketStore(object):
             sys.stderr.write("\n")
             return defer.fail(InvalidTicket())
 
+    def _informTGTOfService(self, st, service, tgt):
+        """
+        Record in the TGT that a service has requested an ST.
+        """
+        try:
+            data = self._tickets[tgt]
+        except KeyError:
+            return defer.fail(InvalidTicket())
+        services = data.setdefault('services', {})
+        services[service] = st
+        self.debug("Added service '%s' to TGT '%s' with ST '%s'." % (service, tgt, st))
+        return st
 
     def mkLoginTicket(self, service):
         """
@@ -522,47 +704,75 @@ class InMemoryTicketStore(object):
         if not ticket.startswith("LT-"):
             raise InvalidTicket()
         def doit(_):
-            data = self._useTicket(ticket)
+            d = self._useTicket(ticket)
             def cb(data):
                 if data['service'] != service:
                     raise InvalidTicket()
-            return data.addCallback(cb)
+            return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
 
 
-    def mkServiceTicket(self, user, service):
+    def mkServiceTicket(self, user, service, tgt, primaryCredentials):
         """
         Create a service ticket
         """
+        if not tgt.startswith("TGC-"):
+            raise InvalidTicket()
         def doit(_):
             return self._mkTicket('ST-', {
                 'user': user,
                 'service': service,
+                'primary_credentials': primaryCredentials,
             })
-        return self._validService(service).addCallback(doit)
+        d = self._validService(service)
+        d.addCallback(doit)
+        d.addCallback(self._informTGTOfService, service, tgt)
+        
+        return d
 
 
-    def useServiceTicket(self, ticket, service):
+    def useServiceTicket(self, ticket, service, requirePrimaryCredentials=False):
         """
         Get the user associated with a service ticket.
         """
         if not ticket.startswith("ST-"):
             raise InvalidTicket()
         def doit(_):
-            data = self._useTicket(ticket)
+            d = self._useTicket(ticket)
             def cb(data):
                 if data['service'] != service:
                     raise InvalidTicket()
+                if requirePrimaryCredentials and data['primary_credentials'] == False:
+                    raise InvalidTicket("This ticket was not issued in response to primary credentials.")
                 return data['user']
-            return data.addCallback(cb)
+            return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
 
+
+    def mkProxyGrantingTicket(self, avatar, service, ticket):
+        """
+        Create Proxy Granting Ticket
+        """
+        if not (ticket.startswith("ST-") or ticket.startswith("PT-")):
+            raise InvalidTicket()
+        
+        def doit(_):
+            charset = string.ascii_letters + string.digits
+            iou = 'PGTIOU-' + (''.join([random.choice(charset) for n in range(256)]))
+            return self._mkTicket('PGT-', {
+                'user': avatar,
+                'service': service,
+                'st_or_pt': ticket,
+                'iou': iou,
+            }).addCallback(lambda pgt : {'iou': iou, 'pgt': pgt})
+        
+        d = self._validService(service)
+        d.addCallback(doit)
+        return d
 
     def mkTicketGrantingCookie(self, user):
         """
         Create a ticket to be used in a cookie.
-
-        XXX
         """
         return self._mkTicket('TGC-', {'user': user}, _timeout=self.cookie_lifespan)
 
@@ -572,10 +782,10 @@ class InMemoryTicketStore(object):
         Get the user associated with this ticket.
         """
         def cb(_): 
-            data = self._useTicket(ticket, _consume=False)
+            d = self._useTicket(ticket, _consume=False)
             def extract_user(data):
                 return data['user']
-            return data.addCallback(extract_user)
+            return d.addCallback(extract_user)
         if service != "":
             return self._isSSOService(service).addCallback(cb)
         else:
@@ -589,16 +799,53 @@ class InMemoryTicketStore(object):
             raise InvalidTicket()
         
         d = self._useTicket(ticket)
-        def cb(_):
+        def cb(data):
             """
             Remove any returned data from the ticket.
             """
+            self.debug("Expired TGT '%s'." % ticket)
+            services = data.get('services', {})
+            self.reactor.callLater(0.0, self._notifyServicesSLO, services)
             return None
         def eb(failure):
             failure.trap(InvalidTicket)
 
         return d.addCallback(cb).addErrback(eb)
-
+        
+    _samlLogoutTemplate = dedent("""\
+        <samlp:LogoutRequest
+            xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+            xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+            ID="%(identifier)s"
+            Version="2.0"
+            IssueInstant="%(issue_instant)s">
+            <saml:NameID>@NOT_USED@</saml:NameID>
+            <samlp:SessionIndex>%(service_ticket)s</samlp:SessionIndex>
+        </samlp:LogoutRequest>
+        """)
+    def _notifyServicesSLO(self, services):
+        """
+        """
+        template = self._samlLogoutTemplate
+        dlist = []
+        for service, st in services.iteritems():
+            self.debug("Notifing service '%s' of SLO with ST '%s' ..." % (service, st))
+            dt = datetime.datetime.today()
+            issue_instant = dt.strftime("%Y-%m-%dT%H:%M:%S")
+            identifier = str(uuid.uuid4())
+            
+            data = template % {
+                'identifier': xml_escape(identifier),
+                'issue_instant': xml_escape(issue_instant),
+                'service_ticket': xml_escape(st)
+            }
+            d = treq.post(service, data=data)
+            dlist.append(d)
+        return defer.DeferredList(dlist, consumeErrors=True)
+        
+            
+            
+            
 
 
 
