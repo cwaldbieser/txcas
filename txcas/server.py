@@ -286,7 +286,9 @@ class ServerApp(object):
             d.addCallback(mkServiceTicket, service, tgc)
             d.addCallback(redirect, service, request)
         else:
-            d.addCallback(self.page_views['login_success'], request)
+            d.addCallback(
+                lambda x: x[0]).addCallback(
+                self.page_views['login_success'], request)
         return d.addErrback(self.page_views['error5xx'], request)
 
     def _renderLogin(self, ticket, service, request):
