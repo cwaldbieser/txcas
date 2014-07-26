@@ -8,6 +8,7 @@ import string
 import sys
 from textwrap import dedent
 from urllib import urlencode
+import urlparse
 import uuid
 from xml.sax.saxutils import escape as xml_escape
 
@@ -22,11 +23,46 @@ import treq
 from twisted.cred.portal import Portal, IRealm
 from twisted.cred.credentials import UsernamePassword
 from twisted.internet import defer, reactor
-from zope.interface import implements
 from twisted.python import log
+import twisted.web.http
+from zope.interface import implements
 
 
 #=======================================================================
+
+def redirectJSHack(self, url):
+    """
+    Redirect using JS hack.
+    """
+    html = dedent("""\
+        <html>
+            <head>
+                <title>Yale Central Authentication Service</title>
+                <script> window.location.href="%(url)s";</script>
+            </head>
+            <body>
+                <noscript>
+                    <p>CAS login successful.</p>
+                    <p>Please proceed to %(url)s .</p>
+                </noscript>
+            </body>
+        </html>
+        """) % {'url': escape_html(url)}
+    self.write(html)
+    self.finish()
+    
+def redirect303(self, url):
+    """
+    Redirect using 303
+    """
+    self.setResponseCode(303)
+    self.setHeader(b"location", url)
+    
+    
+twisted.web.http.Request.redirectJSHack = redirectJSHack
+twisted.web.http.Request.redirect303 = redirect303
+twisted.web.http.Request.redirect302 = twisted.web.http.Request.redirect
+twisted.web.http.Request.redirect = twisted.web.http.Request.redirect303
 
 html_escape_table = {
     "&": "&amp;",
@@ -85,6 +121,8 @@ class CookieAuthFailed(CASError):
 class NotSSOService(CASError):
     pass
 
+class NotHTTPSError(CASError):
+    pass
 
 class ServerApp(object):
 
@@ -426,7 +464,8 @@ class ServerApp(object):
             require_pc = False        
         d = self.ticket_store.useServiceTicket(ticket, service, require_pc)
 
-        def renderUsername(user):
+        def renderUsername(data):
+            user = data['user']
             return 'yes\n' + user.username + '\n'
 
         def renderFailure(err, request):
@@ -441,8 +480,15 @@ class ServerApp(object):
 
     @app.route('/serviceValidate', methods=['GET'])
     def serviceValidate_GET(self, request):
+        return self._serviceOrProxyValidate(request, False)
+        
+    @app.route('/proxyValidate', methods=['GET'])
+    def proxyValidate_GET(self, request):
+        return self._serviceOrProxyValidate(request, True)
+    
+    def _serviceOrProxyValidate(self, request, proxyValidate=True):
         """
-        Validate a service ticket, consuming the ticket in the process.
+        Validate a service ticket or proxy ticket, consuming the ticket in the process.
         """
         ticket = request.args.get('ticket', [None])[0]
         service = request.args.get('service', [None])[0]
@@ -457,6 +503,7 @@ class ServerApp(object):
             require_pc = True
         else:
             require_pc = False
+        
         d = self.ticket_store.useServiceTicket(ticket, service, require_pc)
 
         def renderSuccess(results):
@@ -502,19 +549,21 @@ class ServerApp(object):
         d.addErrback(self.page_views['error5xx'], request)
         return d        
 
-    def _validateProxy(self, avatar, pgturl, service, ticket, request):
+    def _validateProxy(self, data, pgturl, service, ticket, request):
         """
         Validate service callback.
         Generate PGT + IOU.
         POST both to pgturl.
         Return avatar *and* IOU.
         """
+        avatar = data['user']
+        tgt = data['tgt']
         results = {'avatar': avatar}
         if pgturl == "":
             return results
         
         def _mkPGT(_):
-            return self.ticket_store.mkProxyGrantingTicket(avatar, service, ticket)
+            return self.ticket_store.mkProxyGrantingTicket(avatar, service, ticket, tgt, pgturl)
         
         def _sendTicketAndIou(pgt_info, pgturl):
             """
@@ -528,19 +577,29 @@ class ServerApp(object):
                 return pgtiou
                 
             q = {'pgtId': pgt, 'pgtIou': iou}
-            return treq.get(pgturl + '?' + urlencode(q)).addCallback(iou_cb, iou)
+            d = treq.get(pgturl, params=q, timeout=30)
+            d.addCallback(treq.content)
+            d.addCallback(iou_cb, iou)
+            return d
             
         def _package_result(iou, avatar):
             d = {'iou': iou, 'avatar': avatar}
             return d
         
         if self.validate_pgturl:
-            d = treq.get(pgturl)
-        else:
-            d = defer.Deferred()
+            p = urlparse.urlparse(pgturl)
+            if p.scheme.lower() != "https":
+                raise NotHTTPSError("The pgtUrl '%s' is not HTTPS.")
+            # Need some way to tell treq that HTTPS URLs should *not* be
+            # verified in this case.
+        
+        d = treq.get(pgturl)
+        d.addCallback(treq.content)
+        
         d.addCallback(_mkPGT)
         d.addCallback(_sendTicketAndIou, pgturl)
         d.addCallback(_package_result, avatar)
+        
         return d
 
 class User(object):
@@ -587,6 +646,7 @@ class InMemoryTicketStore(object):
 
     lifespan = 10
     cookie_lifespan = 60 * 60 * 24 * 2
+    pgt_lifespan = 60 * 60 * 2
     charset = string.ascii_letters + string.digits + '-'
 
 
@@ -635,7 +695,10 @@ class InMemoryTicketStore(object):
         ticket = self._generate(prefix)
         self._tickets[ticket] = data
         self.debug("Added ticket '%s' with data: %s" % (ticket, str(data)))
-        dc = self.reactor.callLater(timeout, self.expireTicket, ticket)
+        if prefix == 'TGC-':
+            dc = self.reactor.callLater(timeout, self.expireTGT, ticket)
+        else:
+            dc = self.reactor.callLater(timeout, self.expireTicket, ticket)
         self._delays[ticket] = (dc, timeout)
         return defer.succeed(ticket)
 
@@ -684,6 +747,24 @@ class InMemoryTicketStore(object):
         services[service] = st
         self.debug("Added service '%s' to TGT '%s' with ST '%s'." % (service, tgt, st))
         return st
+        
+    def _informTGTOfPGT(self, pgt, tgt):
+        """
+        Record in the TGT that a service has requested an ST.
+        """
+        if not pgt.startswith("PGT-"):
+            raise InvalidTicket("PGT '%s' is not valid." % pgt)
+        if not tgt.startswith("TGC-"):
+            raise InvalidTicket("TGT '%s' is not valid." % tgt)
+            
+        try:
+            data = self._tickets[tgt]
+        except KeyError:
+            return defer.fail(InvalidTicket())
+        pgts = data.setdefault('pgts', set([]))
+        pgts.add(pgt)
+        self.debug("Added PGT '%s' to TGT '%s'." % (pgt, tgt))
+        return pgt
 
     def mkLoginTicket(self, service):
         """
@@ -723,6 +804,7 @@ class InMemoryTicketStore(object):
                 'user': user,
                 'service': service,
                 'primary_credentials': primaryCredentials,
+                'tgt': tgt,
             })
         d = self._validService(service)
         d.addCallback(doit)
@@ -733,10 +815,49 @@ class InMemoryTicketStore(object):
 
     def useServiceTicket(self, ticket, service, requirePrimaryCredentials=False):
         """
-        Get the user associated with a service ticket.
+        Get the data associated with a service ticket.
+        """
+        return self._useServiceOrProxyTicket(ticket, service, requirePrimaryCredentials)
+
+    def mkProxyTicket(self, user, service, pgt):
+        """
+        Create a proxy ticket
+        """
+        if not pgt.startswith("PGT-"):
+            raise InvalidTicket()
+        try:
+            tgt = self._tickets[pgt]['tgt']
+        except KeyError:
+            raise InvalidTicket("PGT '%s' is invalid." % pgt)
+            
+        def doit(_):
+            return self._mkTicket('PT-', {
+                'user': user,
+                'service': service,
+                'primary_credentials': False,
+                'pgt': pgt,
+                'tgt': tgt,
+            })
+        d = self._validService(service)
+        d.addCallback(doit)
+        d.addCallback(self._informTGTOfService, service, tgt)
+        
+        return d
+
+    def useServiceOrProxyTicket(self, ticket, service, requirePrimaryCredentials=False):
+        """
+        Get the data associated with a service ticket.
+        """
+        return self._useServiceOrProxyTicket(ticket, service, requirePrimaryCredentials, True)
+
+    def _useServiceOrProxyTicket(self, ticket, service, requirePrimaryCredentials=False, _allow_pt=False):
+        """
+        Get the data associated with a service or proxy ticket.
         """
         if not ticket.startswith("ST-"):
-            raise InvalidTicket()
+            if not ticket.startswith("PT-") and _allow_pt:
+                raise InvalidTicket()
+                
         def doit(_):
             d = self._useTicket(ticket)
             def cb(data):
@@ -744,12 +865,11 @@ class InMemoryTicketStore(object):
                     raise InvalidTicket()
                 if requirePrimaryCredentials and data['primary_credentials'] == False:
                     raise InvalidTicket("This ticket was not issued in response to primary credentials.")
-                return data['user']
+                return data
             return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
 
-
-    def mkProxyGrantingTicket(self, avatar, service, ticket):
+    def mkProxyGrantingTicket(self, avatar, service, ticket, tgt, pgturl):
         """
         Create Proxy Granting Ticket
         """
@@ -757,14 +877,18 @@ class InMemoryTicketStore(object):
             raise InvalidTicket()
         
         def doit(_):
-            charset = string.ascii_letters + string.digits
+            charset = self.charset
             iou = 'PGTIOU-' + (''.join([random.choice(charset) for n in range(256)]))
             return self._mkTicket('PGT-', {
                 'user': avatar,
                 'service': service,
                 'st_or_pt': ticket,
                 'iou': iou,
-            }).addCallback(lambda pgt : {'iou': iou, 'pgt': pgt})
+                'tgt': tgt,
+                'pgturl': pgturl,
+            }, _timeout=self.pgt_lifespan).addCallback(
+                self._informTGTOfPGT, tgt).addCallback(
+                lambda pgt : {'iou': iou, 'pgt': pgt})
         
         d = self._validService(service)
         d.addCallback(doit)
@@ -801,12 +925,19 @@ class InMemoryTicketStore(object):
         d = self._useTicket(ticket)
         def cb(data):
             """
-            Remove any returned data from the ticket.
+            Expire associated PGTs.
+            Perform SLO.
             """
             self.debug("Expired TGT '%s'." % ticket)
+            #SLO
             services = data.get('services', {})
             self.reactor.callLater(0.0, self._notifyServicesSLO, services)
+            #PGTs
+            pgts = data.get('pgts', {})
+            for pgt in pgts:
+                self.expireTicket(pgt)
             return None
+            
         def eb(failure):
             failure.trap(InvalidTicket)
 
@@ -839,7 +970,7 @@ class InMemoryTicketStore(object):
                 'issue_instant': xml_escape(issue_instant),
                 'service_ticket': xml_escape(st)
             }
-            d = treq.post(service, data=data)
+            d = treq.post(service, data=data, _timeout=30).addCallback(treq.content)
             dlist.append(d)
         return defer.DeferredList(dlist, consumeErrors=True)
         

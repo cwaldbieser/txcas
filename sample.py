@@ -70,22 +70,33 @@ class MyApp(object):
         print request.sitepath
         me = request.URLPath().child('landing')
         service = request.URLPath().path
+        if self.act_as_proxy:
+            pgt_markup = """<li><a href="/pgtinfo">Click here to see your current PGT.</a>.</li>"""
+        else:
+            pgt_markup = ""
         return '''<html>
         <body style="background: %(color)s">
             Welcome to the app.
             <br />You are logged in as: %(user)s
-            <br /><a href="%(cas_root)s/login?service=%(service)s">Click here to login</a>.
+            <ul>
+                <li><a href="%(cas_root)s/login?service=%(service)s">Click here to login</a>.</li>
+                <li><a href="%(cas_root)s/login?service=%(service)s&renew=true">Click here to login, forcing the login page.</a>.</li>
+                <li><a href="%(cas_root)s/login?service=%(service)s&gateway=true">Click here to login, using SSO or failing.</a>.</li>
+                %(pgt_markup)s
+                <li><a href="%(cas_root)s/logout?service=%(logout_service)s">Click here to logout of your SSO session.</a>.</li>
+            </ul>
         </body>
         </html>''' % {
             'cas_root': self.cas_root,
             'service': str(request.URLPath().child('landing')),
+            'logout_service': request.URLPath().here(),
             'user': getattr(request.getSession(), 'username', '(nobody)'),
             'color': self.color,
+            'pgt_markup': pgt_markup,
         }
 
     @app.route('/landing', methods=['GET'])
     def landing_GET(self, request):
-        log.msg("landing_GET()")
         try:
             ticket = request.args['ticket'][0]
         except (KeyError, IndexError):
@@ -112,12 +123,11 @@ class MyApp(object):
         url += '?' + params
 
         d = getPage(url)
+        
         def gotResponse(response):
-            log.msg("gotResponse()")
             log.msg(response)
             doc = microdom.parseString(response)
             elms = doc.getElementsByTagName("cas:authenticationSuccess")
-            log.msg(elms)
             valid = False
             pgt = None
             if len(elms) > 0:
@@ -135,7 +145,7 @@ class MyApp(object):
                         pgt = self._ious[iou]
                         del self._ious[iou] 
                     else:
-                        log.error("Could not corrolate PGTIOU '%s'." % iou)
+                        log.msg("[WARNING] Could not corrolate PGTIOU '%s'." % iou)
             if not valid:
                 raise Exception('Invalid login')
             session = request.getSession()
@@ -146,8 +156,7 @@ class MyApp(object):
             request.redirect(request.URLPath().sibling('').path)    
 
         def eb(err):
-            log.msg("eb()")
-            log.msg('error: %s' % (err,))
+            log.err(err)
             return 'Invalid login attempt'
 
         return d.addCallback(gotResponse).addErrback(eb)
@@ -160,6 +169,7 @@ class MyApp(object):
             elm = elms[0]
             st = elm.childNodes[0].value
             log.msg("Received POST SLO with Session Index '%s'." % st)
+        return "ACK"
 
     @app.route('/proxycb', methods=['GET'])
     def proxycb_GET(self, request):
@@ -186,7 +196,7 @@ checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
 page_views = {'login': custom_login}
 #page_views = None
 server_app = ServerApp(InMemoryTicketStore(), UserRealm(), [checker], lambda x:True,
-                       requireSSL=False, page_views=page_views)
+                       requireSSL=False, page_views=page_views, validate_pgturl=False)
 
 
 # combines server/app
