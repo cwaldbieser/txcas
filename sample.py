@@ -71,7 +71,9 @@ class MyApp(object):
         me = request.URLPath().child('landing')
         service = request.URLPath().path
         if self.act_as_proxy:
-            pgt_markup = """<li><a href="/pgtinfo">Click here to see your current PGT.</a>.</li>"""
+            parts = ["""<li><a href="/pgtinfo">Click here to see your current PGT.</a>.</li>"""]
+            parts.append("""<li><a href="/getproxyticket">Request a proxy ticket.</a>.</li>""")
+            pgt_markup = '\n'.join(parts)
         else:
             pgt_markup = ""
         return '''<html>
@@ -184,6 +186,25 @@ class MyApp(object):
         session = request.getSession()
         if hasattr(session, 'pgt'):
             return "PGT == %s" % escape_html(session.pgt)
+        else:
+            return "No PGT"
+
+    @app.route('/getproxyticket', methods=['GET'])
+    def getproxyticket_GET(self, request):
+        session = request.getSession()
+        if hasattr(session, 'pgt'):
+            def printResult(result):
+                return escape_html(result)
+
+            url = self.cas_root + '/proxy'
+            q = {
+                'targetService': str(request.URLPath().sibling('landing')),
+                'pgt': session.pgt,
+            }
+            url += '?' + urlencode(q)
+            d = getPage(url)
+            d.addCallback(printResult) 
+            return d
         else:
             return "No PGT"
 

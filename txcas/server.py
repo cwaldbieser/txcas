@@ -184,8 +184,6 @@ class ServerApp(object):
             page_views = default_page_views
         self.page_views = page_views
 
-    #ENHANCEMENT: There should be a /proxyValidate endpoint.
-    
     @app.route('/login', methods=['GET'])
     def login_GET(self, request):
         """
@@ -505,12 +503,16 @@ class ServerApp(object):
             require_pc = True
         else:
             require_pc = False
-        
-        d = self.ticket_store.useServiceTicket(ticket, service, require_pc)
+       
+        if proxyValidate: 
+            d = self.ticket_store.useServiceOrProxyTicket(ticket, service, require_pc)
+        else:
+            d = self.ticket_store.useServiceTicket(ticket, service, require_pc)
 
         def renderSuccess(results):
             avatar = results['avatar']
             iou = results.get('iou', None)
+            proxy_chain = results.get('proxy_chain', None)
             
             doc_begin = dedent("""\
                 <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
@@ -522,12 +524,20 @@ class ServerApp(object):
             if iou is not None:
                 doc_proxy = "    <cas:proxyGrantingTicket>%s</cas:proxyGrantingTicket>" % (
                     xml_escape(iou))
+            doc_proxy_chain = ""
+            if proxy_chain is not None:
+                parts = ['''        <cas:proxies>''']
+                for pgturl in proxy_chain:
+                    parts.append("""            <cas:proxy>%s</cas:proxy>""" % xml_escape(pgturl))
+                parts.append('''        </cas:proxies>''')
+                doc_proxy_chain = '\n'.join(parts)
+                del parts
             doc_end = dedent("""\
                     </cas:authenticationSuccess>
                 </cas:serviceResponse>
                 """)
             doc_parts = [doc_begin]
-            for part in (doc_attributes, doc_proxy,):
+            for part in (doc_attributes, doc_proxy, doc_proxy_chain):
                 if len(part) > 0:
                     doc_parts.append(part)
             doc_parts.append(doc_end)
@@ -545,27 +555,48 @@ class ServerApp(object):
                 """) % xml_escape(ticket)
             return doc_fail
 
-        d.addCallback(self._validateProxy, pgturl, service, ticket, request)
+        d.addCallback(self._validateProxyUrl, pgturl, service, ticket, request)
         d.addCallback(renderSuccess)
         d.addErrback(renderFailure, request)
         d.addErrback(self.page_views['error5xx'], request)
         return d        
 
-    def _validateProxy(self, data, pgturl, service, ticket, request):
+    def _validateProxyUrl(self, data, pgturl, service, ticket, request):
         """
         Validate service callback.
         Generate PGT + IOU.
         POST both to pgturl.
-        Return avatar *and* IOU.
+        Return avatar.
+        Optionally return IOU, proxy_chain.
         """
+        # NOTE: `data` is the validated ST or PT data.
+        # `ticket` is the ST or PT *identifier*, but the ticket has already
+        # been consumed at this point.  The ID is needed just to in case a 
+        # PGT is created and we want to record its origin ST/PT.
         avatar = data['user']
         tgt = data['tgt']
+
+        # If the validated ticket was a PT, extract the proxy_chain that was used
+        # to create *its* parent PGT so it can be added to the proxy chain for
+        # the requested PGT.
+        #
+        # E.g. Service A obtains a PGT.  It uses PGT-A to get PT-A and request
+        # a service from B.  Service B uses PT-A to get PGT-B.  It requests
+        # PT-B from CAS, and uses PT-B to request service from C.  C validates
+        # PT-B.  The response to C would include the pgturls for A (first) and
+        # B (second).
+        if 'proxy_chain' in data:
+            proxy_chain = data['proxy_chain']
+        else:
+            proxy_chain = None
+
         results = {'avatar': avatar}
         if pgturl == "":
             return results
         
         def _mkPGT(_):
-            return self.ticket_store.mkProxyGrantingTicket(avatar, service, ticket, tgt, pgturl)
+            return self.ticket_store.mkProxyGrantingTicket(
+                avatar, service, ticket, tgt, pgturl, proxy_chain=proxy_chain)
         
         def _sendTicketAndIou(pgt_info, pgturl):
             """
@@ -584,8 +615,10 @@ class ServerApp(object):
             d.addCallback(iou_cb, iou)
             return d
             
-        def _package_result(iou, avatar):
+        def _package_result(iou, avatar, proxy_chain):
             d = {'iou': iou, 'avatar': avatar}
+            if proxy_chain is not None:
+                d['proxy_chain'] = proxy_chain
             return d
         
         if self.validate_pgturl:
@@ -600,8 +633,43 @@ class ServerApp(object):
         
         d.addCallback(_mkPGT)
         d.addCallback(_sendTicketAndIou, pgturl)
-        d.addCallback(_package_result, avatar)
+        d.addCallback(_package_result, avatar, proxy_chain)
         
+        return d
+
+    @app.route('/proxy', methods=['GET'])
+    def proxy_GET(self, request):
+        try:
+            pgt = request.args['pgt'][0]
+            targetService = request.args['targetService'][0]
+        except KeyError:
+            request.setResponseCode(400)
+            # Enhancement: page view
+            return "Bad Request"
+        
+        # Validate the PGT and get the PT
+        def successResult(ticket):
+            return dedent("""\
+                <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+                    <cas:proxySuccess>
+                        <cas:proxyTicket>%s(ticket)</cas:proxyTicket>
+                    </cas:proxySuccess>
+                </cas:serviceResponse>
+                """) % xml_escape(ticket)
+
+        def failureResult(err):
+            log.err(err)
+            return dedent("""\
+                <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+                    <cas:proxyFailure code="INVALID_REQUEST">
+                        Error requesting proxy ticket.       
+                    </cas:proxyFailure>
+                </cas:serviceResponse>
+                """)
+
+        d = self.ticket_store.mkProxyTicket(targetService, pgt)
+        d.addCallback(successResult)
+        d.addErrback(failureResult)
         return d
 
 class User(object):
@@ -821,22 +889,35 @@ class InMemoryTicketStore(object):
         """
         return self._useServiceOrProxyTicket(ticket, service, requirePrimaryCredentials)
 
-    def mkProxyTicket(self, user, service, pgt):
+    def mkProxyTicket(self, service, pgt):
         """
         Create a proxy ticket
         """
         if not pgt.startswith("PGT-"):
             raise InvalidTicket()
+
         try:
-            tgt = self._tickets[pgt]['tgt']
+            pgt_info = self._tickets[pgt]
         except KeyError:
             raise InvalidTicket("PGT '%s' is invalid." % pgt)
+        pgturl = pgt_info['pgturl']
+        if service != pgt_info['service']:
+            raise InvalidTicket(
+                    "The service requested ('%s') does not match "
+                    "the service for which this ticket was issued ('%s')" % (
+                        service, pgt_info['service']))
+        try:
+            tgt = pgt_info['tgt']
+        except KeyError:
+            raise InvalidTicket("PGT '%s' is invalid." % pgt)
+
             
         def doit(_):
             return self._mkTicket('PT-', {
-                'user': user,
+                'user': pgt_info['user'],
                 'service': service,
                 'primary_credentials': False,
+                'pgturl': pgturl,
                 'pgt': pgt,
                 'tgt': tgt,
             })
@@ -871,7 +952,7 @@ class InMemoryTicketStore(object):
             return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
 
-    def mkProxyGrantingTicket(self, avatar, service, ticket, tgt, pgturl):
+    def mkProxyGrantingTicket(self, avatar, service, ticket, tgt, pgturl, proxy_chain=None):
         """
         Create Proxy Granting Ticket
         """
@@ -881,14 +962,22 @@ class InMemoryTicketStore(object):
         def doit(_):
             charset = self.charset
             iou = 'PGTIOU-' + (''.join([random.choice(charset) for n in range(256)]))
-            return self._mkTicket('PGT-', {
+            data = {
                 'user': avatar,
                 'service': service,
                 'st_or_pt': ticket,
                 'iou': iou,
                 'tgt': tgt,
                 'pgturl': pgturl,
-            }, _timeout=self.pgt_lifespan).addCallback(
+            }
+            if proxy_chain is not None:
+                new_proxy_chain = list(proxy_chain)
+                new_proxy_chain.append(pgturl)
+            else:
+                new_proxy_chain = [pgturl]
+            data['proxy_chain'] = new_proxy_chain 
+        
+            return self._mkTicket('PGT-', data, _timeout=self.pgt_lifespan).addCallback(
                 self._informTGTOfPGT, tgt).addCallback(
                 lambda pgt : {'iou': iou, 'pgt': pgt})
         
