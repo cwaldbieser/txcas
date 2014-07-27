@@ -73,6 +73,7 @@ class MyApp(object):
         if self.act_as_proxy:
             parts = ["""<li><a href="/pgtinfo">Click here to see your current PGT.</a>.</li>"""]
             parts.append("""<li><a href="/getproxyticket">Request a proxy ticket.</a>.</li>""")
+            parts.append("""<li><a href="/badproxyticket">Make a bad request for a proxy ticket.</a>.</li>""")
             pgt_markup = '\n'.join(parts)
         else:
             pgt_markup = ""
@@ -194,7 +195,20 @@ class MyApp(object):
         session = request.getSession()
         if hasattr(session, 'pgt'):
             def printResult(result):
-                return escape_html(result)
+                return dedent("""\
+                    <html>
+                        <head><title>/proxy Result</title></head>
+                        <body>
+                            <h1>/proxy Result</h1>
+                            <pre>
+                    %(result)s
+                            </pre>
+                            <p>
+                            <a href="/">Back</a>
+                            </p>
+                        </body>
+                    </html>
+                    """) % {'result': escape_html(result)}
 
             url = self.cas_root + '/proxy'
             q = {
@@ -206,7 +220,50 @@ class MyApp(object):
             d.addCallback(printResult) 
             return d
         else:
-            return "No PGT"
+            return dedent("""\
+                <html>
+                    <head><title>No PGT</title></head>
+                    <body>
+                        <h1>No PGT</h1>
+                        <p>
+                        <a href="/">Back</a>
+                        </p>
+                    </body>
+                </html>
+                """) % {'result': escape_html(result)}
+
+
+    @app.route('/badproxyticket', methods=['GET'])
+    def badproxyticket_GET(self, request):
+        session = request.getSession()
+        if hasattr(session, 'pgt'):
+            pgt = session.pgt
+        else:
+            pgt = 'PGT-bogus'
+        def printResult(result):
+            return dedent("""\
+                <html>
+                    <head><title>/proxy Result</title></head>
+                    <body>
+                        <h1>/proxy Result</h1>
+                        <pre>
+                %(result)s
+                        </pre>
+                        <p>
+                        <a href="/">Back</a>
+                        </p>
+                    </body>
+                </html>
+                """) % {'result': escape_html(result)}
+        url = self.cas_root + '/proxy'
+        q = {
+            'targetService': 'foo',
+            'pgt': pgt,
+        }
+        url += '?' + urlencode(q)
+        d = getPage(url)
+        d.addCallback(printResult) 
+        return d
 
 # server
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse

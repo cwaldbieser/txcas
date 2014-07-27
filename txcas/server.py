@@ -652,10 +652,10 @@ class ServerApp(object):
             return dedent("""\
                 <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
                     <cas:proxySuccess>
-                        <cas:proxyTicket>%s(ticket)</cas:proxyTicket>
+                        <cas:proxyTicket>%(ticket)s</cas:proxyTicket>
                     </cas:proxySuccess>
                 </cas:serviceResponse>
-                """) % xml_escape(ticket)
+                """) % {'ticket': xml_escape(ticket)}
 
         def failureResult(err):
             log.err(err)
@@ -667,7 +667,7 @@ class ServerApp(object):
                 </cas:serviceResponse>
                 """)
 
-        d = self.ticket_store.mkProxyTicket(targetService, pgt)
+        d = defer.maybeDeferred(self.ticket_store.mkProxyTicket, targetService, pgt)
         d.addCallback(successResult)
         d.addErrback(failureResult)
         return d
