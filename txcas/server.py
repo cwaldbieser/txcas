@@ -92,11 +92,11 @@ def make_cas_attributes(attribs):
     """
     if len(attribs) == 0:
         return ""
-    parts = ["<cas:attributes>"]
+    parts = ["        <cas:attributes>"]
     for k, v in attribs:
         k = sanitize_keyname(k)
-        parts.append("    <cas:%s>%s</cas:%s>" % (k, xml_escape(v), k))
-    parts.append("</cas:attributes>") 
+        parts.append("            <cas:%s>%s</cas:%s>" % (k, xml_escape(v), k))
+    parts.append("        </cas:attributes>") 
     return '\n'.join(parts)
 
 def sanitize_keyname(name):
@@ -165,6 +165,7 @@ class ServerApp(object):
         self.cookies = {}
         self.ticket_store = ticket_store
         self.portal = Portal(realm)
+        self.realm = realm
         self.requireSSL = requireSSL
         map(self.portal.registerChecker, checkers)
         self.validService = validService or (lambda x: True)
@@ -252,26 +253,25 @@ class ServerApp(object):
             self.page_views['login'], service, request)
             
 
-    def _authenticated(self, user, primaryCredentials, service, request):
+    def _authenticated(self, avatar_id, primaryCredentials, service, request):
         """
         Call this after authentication has succeeded to finish the request.
         """
         tgc = request.getCookie(self.cookie_name)
         
         @defer.inlineCallbacks
-        def maybeAddCookie(user, request):
+        def maybeAddCookie(avatar_id, request):
             ticket = request.getCookie(self.cookie_name)
             if not ticket:
                 path = request.URLPath().sibling('').path
-                ticket = yield self.ticket_store.mkTicketGrantingCookie(user)
+                ticket = yield self.ticket_store.mkTicketGrantingCookie(avatar_id)
                 request.addCookie(self.cookie_name, ticket, path=path,
                                   secure=self.requireSSL)
                 request.cookies[-1] += '; HttpOnly'
-            defer.returnValue((user, ticket))
+            defer.returnValue(ticket)
 
-        def mkServiceTicket(user_tgc, service, tgc):
-            user, tgc = user_tgc
-            return self.ticket_store.mkServiceTicket(user, service, tgc, primaryCredentials)
+        def mkServiceTicket(tgc, service):
+            return self.ticket_store.mkServiceTicket(service, tgc, primaryCredentials)
 
         def redirect(ticket, service, request):
             query = urlencode({
@@ -279,9 +279,9 @@ class ServerApp(object):
             })
             request.redirect(service + '?' + query)
 
-        d = maybeAddCookie(user, request)
+        d = maybeAddCookie(avatar_id, request)
         if service != "":
-            d.addCallback(mkServiceTicket, service, tgc)
+            d.addCallback(mkServiceTicket, service)
             d.addCallback(redirect, service, request)
         else:
             d.addCallback(
@@ -383,9 +383,8 @@ class ServerApp(object):
             credentials = UsernamePassword(username, password)
             return self.portal.login(credentials, None, ICASUser)
 
-        def extract_avatar(avatarAspect):
-            interface, avatar, logout = avatarAspect
-            return avatar
+        def inject_avatar_id(_, avatar_id):
+            return avatar_id
 
         def eb(err, service, request):
             # ENHANCEMENT: It would be much better if this errorback 
@@ -404,7 +403,7 @@ class ServerApp(object):
         # check credentials
         d = self.ticket_store.useLoginTicket(ticket, service)
         d.addCallback(checkPassword, username, password)
-        d.addCallback(extract_avatar)
+        d.addCallback(inject_avatar_id, username)
         d.addCallback(self._authenticated, True, service, request)
         d.addErrback(eb, service, request)
         return d
@@ -465,9 +464,14 @@ class ServerApp(object):
         d = self.ticket_store.useServiceTicket(ticket, service, require_pc)
 
         def renderUsername(data):
-            user = data['user']
-            return 'yes\n' + user.username + '\n'
-
+            avatar_id = data['avatar_id']
+            
+            def successResult(result):
+                iface, avatarAspect, logout = result
+                return 'yes\n' + avatarAspect.username + '\n'
+            
+            return self.real.requestAvatar(avatar_id, None, ICASUser).addCallback(successResult)
+            
         def renderFailure(err, request):
             err.trap(InvalidTicket)
             request.setResponseCode(403)
@@ -509,6 +513,14 @@ class ServerApp(object):
         else:
             d = self.ticket_store.useServiceTicket(ticket, service, require_pc)
 
+        def getAvatar(ticket_data):
+            def avatarResult(result, ticket_data):
+                iface, avatarAspect, logout = result
+                ticket_data['avatar'] = avatarAspect
+                return ticket_data
+            return self.realm.requestAvatar(ticket_data['avatar_id'], None, ICASUser).addCallback(
+                avatarResult, ticket_data) 
+
         def renderSuccess(results):
             avatar = results['avatar']
             iou = results.get('iou', None)
@@ -517,7 +529,7 @@ class ServerApp(object):
             doc_begin = dedent("""\
                 <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
                     <cas:authenticationSuccess>
-                    <cas:user>%s</cas:user>
+                        <cas:user>%s</cas:user>
                 """) % xml_escape(avatar.username)
             doc_attributes = make_cas_attributes(avatar.attribs)
             doc_proxy = ""
@@ -556,6 +568,7 @@ class ServerApp(object):
             return doc_fail
 
         d.addCallback(self._validateProxyUrl, pgturl, service, ticket, request)
+        d.addCallback(getAvatar)
         d.addCallback(renderSuccess)
         d.addErrback(renderFailure, request)
         d.addErrback(self.page_views['error5xx'], request)
@@ -573,7 +586,7 @@ class ServerApp(object):
         # `ticket` is the ST or PT *identifier*, but the ticket has already
         # been consumed at this point.  The ID is needed just to in case a 
         # PGT is created and we want to record its origin ST/PT.
-        avatar = data['user']
+        avatar_id = data['avatar_id']
         tgt = data['tgt']
 
         # If the validated ticket was a PT, extract the proxy_chain that was used
@@ -590,13 +603,12 @@ class ServerApp(object):
         else:
             proxy_chain = None
 
-        results = {'avatar': avatar}
         if pgturl == "":
-            return results
+            return data
         
         def _mkPGT(_):
             return self.ticket_store.mkProxyGrantingTicket(
-                avatar, service, ticket, tgt, pgturl, proxy_chain=proxy_chain)
+                service, ticket, tgt, pgturl, proxy_chain=proxy_chain)
         
         def _sendTicketAndIou(pgt_info, pgturl):
             """
@@ -615,11 +627,9 @@ class ServerApp(object):
             d.addCallback(iou_cb, iou)
             return d
             
-        def _package_result(iou, avatar, proxy_chain):
-            d = {'iou': iou, 'avatar': avatar}
-            if proxy_chain is not None:
-                d['proxy_chain'] = proxy_chain
-            return d
+        def _package_result(iou, data):
+            data['iou'] = iou
+            return data
         
         if self.validate_pgturl:
             p = urlparse.urlparse(pgturl)
@@ -633,7 +643,7 @@ class ServerApp(object):
         
         d.addCallback(_mkPGT)
         d.addCallback(_sendTicketAndIou, pgturl)
-        d.addCallback(_package_result, avatar, proxy_chain)
+        d.addCallback(_package_result, data)
         
         return d
 
@@ -696,16 +706,18 @@ class UserRealm(object):
     def requestAvatar(self, avatarId, mind, *interfaces):
         """
         """
-        if not ICASUser in interfaces:
-            raise NotImplementedError("This realm only implements ICASUser.")
-        attribs = [
-            ('email', "%s@lafayette.edu" % avatarId),
-            ('domain', 'lafayette.edu'),]
-        # ENHANCEMENT: This method can also return a deferred that returns
-        # (interface, avatar, logout).  Useful if reading user information
-        # from a database or LDAP directory.
-        avatar = User(avatarId, attribs)
-        return (ICASUser, avatar, avatar.logout)
+        def cb():
+            if not ICASUser in interfaces:
+                raise NotImplementedError("This realm only implements ICASUser.")
+            attribs = [
+                ('email', "%s@lafayette.edu" % avatarId),
+                ('domain', 'lafayette.edu'),]
+            # ENHANCEMENT: This method can also return a deferred that returns
+            # (interface, avatar, logout).  Useful if reading user information
+            # from a database or LDAP directory.
+            avatar = User(avatarId, attribs)
+            return (ICASUser, avatar, avatar.logout)
+        return defer.maybeDeferred(cb)
 
 
 
@@ -863,22 +875,27 @@ class InMemoryTicketStore(object):
         return self._validService(service).addCallback(doit)
 
 
-    def mkServiceTicket(self, user, service, tgt, primaryCredentials):
+    def mkServiceTicket(self, service, tgt_id, primaryCredentials):
         """
         Create a service ticket
         """
-        if not tgt.startswith("TGC-"):
+        if not tgt_id.startswith("TGC-"):
             raise InvalidTicket()
+        try:
+            tgt = self._tickets[tgt_id]
+        except KeyError:
+            raise InvalidTicket("Invalid TGT '%s'." % tgt_id)
+            
         def doit(_):
             return self._mkTicket('ST-', {
-                'user': user,
+                'avatar_id': tgt['avatar_id'],
                 'service': service,
                 'primary_credentials': primaryCredentials,
-                'tgt': tgt,
+                'tgt': tgt_id,
             })
         d = self._validService(service)
         d.addCallback(doit)
-        d.addCallback(self._informTGTOfService, service, tgt)
+        d.addCallback(self._informTGTOfService, service, tgt_id)
         
         return d
 
@@ -901,11 +918,7 @@ class InMemoryTicketStore(object):
         except KeyError:
             raise InvalidTicket("PGT '%s' is invalid." % pgt)
         pgturl = pgt_info['pgturl']
-        if service != pgt_info['service']:
-            raise InvalidTicket(
-                    "The service requested ('%s') does not match "
-                    "the service for which this ticket was issued ('%s')" % (
-                        service, pgt_info['service']))
+
         try:
             tgt = pgt_info['tgt']
         except KeyError:
@@ -914,12 +927,13 @@ class InMemoryTicketStore(object):
             
         def doit(_):
             return self._mkTicket('PT-', {
-                'user': pgt_info['user'],
+                'avatar_id': pgt_info['avatar_id'],
                 'service': service,
                 'primary_credentials': False,
                 'pgturl': pgturl,
                 'pgt': pgt,
                 'tgt': tgt,
+                'proxy_chain': pgt_info['proxy_chain'],
             })
         d = self._validService(service)
         d.addCallback(doit)
@@ -952,18 +966,23 @@ class InMemoryTicketStore(object):
             return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
 
-    def mkProxyGrantingTicket(self, avatar, service, ticket, tgt, pgturl, proxy_chain=None):
+    def mkProxyGrantingTicket(self, service, ticket, tgt, pgturl, proxy_chain=None):
         """
         Create Proxy Granting Ticket
         """
         if not (ticket.startswith("ST-") or ticket.startswith("PT-")):
             raise InvalidTicket()
         
+        try:
+            tgt_info = self._tickets[tgt]
+        except KeyError:
+            raise InvalidTicket("TGT '%s' is invalid." % tgt)
+        
         def doit(_):
             charset = self.charset
             iou = 'PGTIOU-' + (''.join([random.choice(charset) for n in range(256)]))
             data = {
-                'user': avatar,
+                'avatar_id': tgt_info['avatar_id'],
                 'service': service,
                 'st_or_pt': ticket,
                 'iou': iou,
@@ -985,24 +1004,22 @@ class InMemoryTicketStore(object):
         d.addCallback(doit)
         return d
 
-    def mkTicketGrantingCookie(self, user):
+    def mkTicketGrantingCookie(self, avatar_id):
         """
         Create a ticket to be used in a cookie.
         """
-        return self._mkTicket('TGC-', {'user': user}, _timeout=self.cookie_lifespan)
+        return self._mkTicket('TGC-', {'avatar_id': avatar_id}, _timeout=self.cookie_lifespan)
 
 
     def useTicketGrantingCookie(self, ticket, service):
         """
         Get the user associated with this ticket.
         """
-        def cb(_): 
-            d = self._useTicket(ticket, _consume=False)
-            def extract_user(data):
-                return data['user']
-            return d.addCallback(extract_user)
+        def use_ticket_cb(_): 
+            return self._useTicket(ticket, _consume=False)
+            
         if service != "":
-            return self._isSSOService(service).addCallback(cb)
+            return self._isSSOService(service).addCallback(use_ticket_cb)
         else:
             return cb(None)
 

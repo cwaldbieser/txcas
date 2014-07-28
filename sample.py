@@ -23,6 +23,7 @@ def custom_login(ticket, service, request):
         'http://127.0.0.1:9801/landing': 'Cool App #1',
         'http://127.0.0.1:9802/landing': 'Awesome App #2',
         'http://127.0.0.1:9803/landing': 'Super Secure App #3',
+        'http://127.0.0.1:9804/landing': 'Just Another App #4',
     }
     top = dedent('''\
         <!DOCTYPE html>
@@ -57,12 +58,15 @@ class MyApp(object):
     app = Klein()
 
 
-    def __init__(self, color, cas_root, allow_sso=True, act_as_proxy=False):
+    def __init__(
+            self, color, cas_root, allow_sso=True, 
+            act_as_proxy=None, act_as_link_in_proxy_chain=None):
         self.color = color
         self.cas_root = cas_root
         self.allow_sso = allow_sso
         self.act_as_proxy = act_as_proxy
         self._ious = {}
+        self.act_as_link_in_proxy_chain = act_as_link_in_proxy_chain
 
     @app.route('/')
     def index(self, request):
@@ -70,9 +74,9 @@ class MyApp(object):
         print request.sitepath
         me = request.URLPath().child('landing')
         service = request.URLPath().path
-        if self.act_as_proxy:
+        if self.act_as_proxy is not None:
             parts = ["""<li><a href="/pgtinfo">Click here to see your current PGT.</a>.</li>"""]
-            parts.append("""<li><a href="/getproxyticket">Request a proxy ticket.</a>.</li>""")
+            parts.append("""<li><a href="/proxy-a-service">This service will proxy another service.</a>.</li>""")
             parts.append("""<li><a href="/badproxyticket">Make a bad request for a proxy ticket.</a>.</li>""")
             pgt_markup = '\n'.join(parts)
         else:
@@ -114,7 +118,7 @@ class MyApp(object):
         }
         if not self.allow_sso:
             q['renew'] = True
-        if self.act_as_proxy:
+        if self.act_as_proxy is not None:
             if request.isSecure():
                 scheme = "https://"
             else:
@@ -190,16 +194,60 @@ class MyApp(object):
         else:
             return "No PGT"
 
-    @app.route('/getproxyticket', methods=['GET'])
+    @app.route('/proxy-a-service', methods=['GET'])
     def getproxyticket_GET(self, request):
+        act_as_proxy = self.act_as_proxy
+        proxied_service = act_as_proxy['service']
+        request_service_endpoint = act_as_proxy['request_service_endpoint']
+        if proxied_service is None:
+            return dedent("""\
+                <html>
+                    <head><title>Not Configured to Proxy a Service</title></head>
+                    <body style="background: %(color)s">
+                        <h1>Not Configured to Proxy a Service</h1>
+                        <p>
+                        This service is not configured to proxy a service.
+                        </p>
+                        <p>
+                        <a href="/">Back</a>
+                        </p>
+                    </body>
+                </html>
+                """) % {'color': self.color}
         session = request.getSession()
         if hasattr(session, 'pgt'):
+            
+            def parsePT(result):
+                log.msg(result)
+                doc = microdom.parseString(result)
+                elms = doc.getElementsByTagName("cas:proxySuccess")
+                if len(elms) == 0:
+                    raise Exception("Error parsing PT")
+                elms = doc.getElementsByTagName("cas:proxyTicket")
+                if len(elms) == 0:
+                    raise Exception("Error parsing PT")
+                elm = elms[0]
+                pt = elm.childNodes[0].value
+                return pt
+                
+            def requestService(pt, proxied_service, request_service_endpoint):
+                q = {
+                    'ticket': pt,
+                    'service': proxied_service
+                }
+                url = request_service_endpoint + '?' + urlencode(q)
+                d = getPage(url)
+                return d
+                
             def printResult(result):
                 return dedent("""\
                     <html>
-                        <head><title>/proxy Result</title></head>
-                        <body>
-                            <h1>/proxy Result</h1>
+                        <head><title>Proxy a Service</title></head>
+                        <body style="background: %(color)s">
+                            <h1>Proxy a Service</h1>
+                            <p>
+                            Proxying service at: %(proxied_service)s
+                            </p>
                             <pre>
                     %(result)s
                             </pre>
@@ -208,43 +256,69 @@ class MyApp(object):
                             </p>
                         </body>
                     </html>
-                    """) % {'result': escape_html(result)}
+                    """) % {
+                        'color': self.color,
+                        'result': escape_html(result), 
+                        'proxied_service': escape_html(proxied_service)}
+                    
+            def printError(err):
+                log.err(err)
+                return dedent("""\
+                    <html>
+                        <head><title>Proxy a Service - Error</title></head>
+                        <body style="background: %(color)s">
+                            <h1>Proxy a Service - Error</h1>
+                            <p>
+                            Errors occured while proxying service at: %(proxied_service)s
+                            </p>
+                            <pre>
+                    %(result)s
+                            </pre>
+                            <p>
+                            <a href="/">Back</a>
+                            </p>
+                        </body>
+                    </html>
+                    """) % {
+                        'color': self.color,
+                        'result': escape_html(str(err)), 
+                        'proxied_service': escape_html(proxied_service)}
 
             url = self.cas_root + '/proxy'
             q = {
-                'targetService': str(request.URLPath().sibling('landing')),
+                'targetService': proxied_service,
                 'pgt': session.pgt,
             }
             url += '?' + urlencode(q)
             d = getPage(url)
+            d.addCallback(parsePT)
+            d.addCallback(requestService, proxied_service, request_service_endpoint)
             d.addCallback(printResult) 
+            d.addErrback(printError)
             return d
         else:
             return dedent("""\
                 <html>
                     <head><title>No PGT</title></head>
-                    <body>
+                    <body style="background: %(color)s">
                         <h1>No PGT</h1>
                         <p>
                         <a href="/">Back</a>
                         </p>
                     </body>
                 </html>
-                """) % {'result': escape_html(result)}
+                """) % {
+                    'color': self.color,}
 
 
     @app.route('/badproxyticket', methods=['GET'])
     def badproxyticket_GET(self, request):
-        session = request.getSession()
-        if hasattr(session, 'pgt'):
-            pgt = session.pgt
-        else:
-            pgt = 'PGT-bogus'
+        pgt = 'PGT-bogus'
         def printResult(result):
             return dedent("""\
                 <html>
                     <head><title>/proxy Result</title></head>
-                    <body>
+                    <body style="background: %(color)s">
                         <h1>/proxy Result</h1>
                         <pre>
                 %(result)s
@@ -254,7 +328,9 @@ class MyApp(object):
                         </p>
                     </body>
                 </html>
-                """) % {'result': escape_html(result)}
+                """) % {
+                    'color': self.color,
+                    'result': escape_html(result)}
         url = self.cas_root + '/proxy'
         q = {
             'targetService': 'foo',
@@ -263,6 +339,94 @@ class MyApp(object):
         url += '?' + urlencode(q)
         d = getPage(url)
         d.addCallback(printResult) 
+        return d
+
+    @app.route('/acceptproxyticket', methods=['GET'])
+    def acceptproxyticket_GET(self, request):
+        act_as_link_in_proxy_chain = self.act_as_link_in_proxy_chain
+        if act_as_link_in_proxy_chain is not None:
+            proxied_service = act_as_link_in_proxy_chain['service']
+            request_service_endpoint = act_as_link_in_proxy_chain['request_service_endpoint']
+        
+        try:
+            ticket = request.args['ticket'][0]
+        except (KeyError, IndexError):
+            request.setResponseCode(400)
+            return 'Bad request'
+        if not ticket:
+            request.setResponseCode(400)
+            return 'Bad request'
+
+        url = self.cas_root + '/proxyValidate'
+        q = {
+            'service': str(request.URLPath().sibling("landing")),
+            'ticket': ticket,
+        }
+        if act_as_link_in_proxy_chain is not None:
+            q['pgtUrl'] = str(request.URLPath().sibling("proxycb"))
+            
+        params = urlencode(q)
+        url += '?' + params
+
+        def requestPT(result, proxied_service):
+            doc = microdom.parseString(result)
+            elms = doc.getElementsByTagName("cas:authenticationSuccess")
+            valid = False
+            pgt = None
+            if len(elms) == 0:
+                log.msg("[WARNING] CAS authentication failed.  Result was:\n%s" % str(result))
+                raise Exception("CAS authentication failed.")
+            elms = doc.getElementsByTagName("cas:proxyGrantingTicket")
+            if len(elms) == 0:
+                log.msg("[WARNING] No PGT IOU was supplied.  Result was:\n%s" % str(result))
+                raise Exception("No PGT IOU was supplied.")
+            elm = elms[0]
+            iou = elm.childNodes[0].value
+            pgt = None
+            if iou in self._ious:
+                pgt = self._ious[iou]
+                del self._ious[iou] 
+            else:
+                log.msg("[WARNING] Could not corrolate PGTIOU '%s'." % iou)
+                raise Exception("Could not corrolate PGTIOU.")
+                
+            # Request the PT.
+            url = self.cas_root + '/proxy'
+            q = {
+                'targetService': proxied_service,
+                'pgt': pgt,
+            }
+            url += '?' + urlencode(q)
+            d = getPage(url)
+            return d
+            
+        def proxyService(result, request_service_endpoint, proxied_service):
+            #Parse the PT.
+            doc = microdom.parseString(result)
+            elms = doc.getElementsByTagName("cas:proxySuccess")
+            if len(elms) == 0:
+                raise Exception("Error parsing PT")
+            elms = doc.getElementsByTagName("cas:proxyTicket")
+            if len(elms) == 0:
+                raise Exception("Error parsing PT")
+            elm = elms[0]
+            pt = elm.childNodes[0].value
+            
+            # Make the request
+            q = {
+                'service': proxied_service,
+                'ticket': pt,
+            }
+            url = request_service_endpoint + '?' + urlencode(q)
+            d = getPage(url)
+            return d
+
+        d = getPage(url)
+        
+        if act_as_link_in_proxy_chain is not None:
+            d.addCallback(requestPT, proxied_service)
+            d.addCallback(proxyService, request_service_endpoint, proxied_service)
+
         return d
 
 # server
@@ -289,16 +453,29 @@ log.startLogging(sys.stdout)
 reactor.listenTCP(9800, Site(server_app.app.resource()))
 
 # app 1
-app1 = MyApp('#acf', 'http://127.0.0.1:9800')
+app1 = MyApp(
+    '#acf', 'http://127.0.0.1:9800',
+    act_as_link_in_proxy_chain={
+        'request_service_endpoint': 'http://127.0.0.1:9804/acceptproxyticket',
+        'service': 'http://127.0.0.1:9804/landing',})
 reactor.listenTCP(9801, Site(app1.app.resource()))
 
 # app 2
-app2 = MyApp('#cfc', 'http://127.0.0.1:9800', act_as_proxy=True)
+app2 = MyApp(
+    '#cfc', 'http://127.0.0.1:9800',
+    act_as_proxy={
+        'request_service_endpoint': 'http://127.0.0.1:9801/acceptproxyticket',
+        'service': 'http://127.0.0.1:9801/landing'})
 reactor.listenTCP(9802, Site(app2.app.resource()))
 
 # app 3
 app3 = MyApp('#abc', 'http://127.0.0.1:9800', allow_sso=False)
 reactor.listenTCP(9803, Site(app3.app.resource()))
+
+# app 4
+app4 = MyApp('#9932CC', 'http://127.0.0.1:9800')
+reactor.listenTCP(9804, Site(app4.app.resource()))
+
 
 reactor.run()
 
