@@ -189,23 +189,25 @@ class ServerApp(object):
     def login_GET(self, request):
         """
         Present a username/password login page to the browser.
+        OR
+        authenticate using an existing TGC.
         """
         service = request.args.get('service', [""])[0]
         renew = request.args.get('renew', [""])[0]
         if renew != "":
             return self._presentLogin(request)
             
-        d = self._authenticateByCookie(request)
-        d.addErrback(lambda _:self._presentLogin(request))
         def service_err(err, request):
             err.trap(InvalidService)
             err.printTraceback(file=sys.stderr)
             request.setResponseCode(403)
             return defer.maybeDeferred(
                 self.page_views['invalid_service'], service, request)
+
+        d = self._authenticateByCookie(request)
+        d.addErrback(lambda _:self._presentLogin(request))
         d.addErrback(service_err, request)
         return d.addErrback(self.page_views['error5xx'], request)
-
 
     def _authenticateByCookie(self, request):
         tgc = request.getCookie(self.cookie_name)
@@ -215,7 +217,9 @@ class ServerApp(object):
         # I think a browser won't send expired cookies.  Anyway, expiration
         # should happen on the server.
         service = request.args.get('service', [""])[0]
-        d = self.ticket_store.useTicketGrantingCookie(tgc, service)
+
+        def extract_avatar_id(result):
+            return result['avatar_id']
 
         def eb(err, request):
             err.trap(InvalidTicket, NotSSOService)
@@ -223,6 +227,9 @@ class ServerApp(object):
             request.addCookie(self.cookie_name, '',
                               expires='Thu, 01 Jan 1970 00:00:00 GMT')
             return err
+
+        d = self.ticket_store.useTicketGrantingCookie(tgc, service)
+        d.addCallback(extract_avatar_id)
         d.addErrback(eb, request)
         return d.addCallback(self._authenticated, False, service, request)
 
@@ -383,6 +390,11 @@ class ServerApp(object):
             credentials = UsernamePassword(username, password)
             return self.portal.login(credentials, None, ICASUser)
 
+        def log_authentication(result, username):
+            msg = "[INFO] Authenicated user '%s' using primary credentials." % username
+            log.msg(msg)
+            return result
+
         def inject_avatar_id(_, avatar_id):
             return avatar_id
 
@@ -403,6 +415,7 @@ class ServerApp(object):
         # check credentials
         d = self.ticket_store.useLoginTicket(ticket, service)
         d.addCallback(checkPassword, username, password)
+        d.addCallback(log_authentication, username)
         d.addCallback(inject_avatar_id, username)
         d.addCallback(self._authenticated, True, service, request)
         d.addErrback(eb, service, request)
@@ -521,8 +534,25 @@ class ServerApp(object):
             return self.realm.requestAvatar(ticket_data['avatar_id'], None, ICASUser).addCallback(
                 avatarResult, ticket_data) 
 
-        def renderSuccess(results):
+        def renderSuccess(results, ticket):
             avatar = results['avatar']
+            msg = '[INFO] Validated ticket'
+            info = [('ticket', ticket),
+                    ('username', avatar.username),
+                    ('service', results['service']),
+                    ('primary_credentials', results['primary_credentials'])]
+            if 'tgt' in results:
+                info.append(('TGC', results['tgt']))
+            if 'pgt' in results:
+                info.append(('PGT', results['pgt']))
+            if 'pgturl' in results:
+                info.append(('pgturl', results['pgturl']))
+            parts = [msg]
+            for name, val in info:
+                parts.append('%(name)s="%(value)s"' % {'name': name, 'value': val})
+            msg = ' '.join(parts)
+            del parts
+            log.msg(msg)
             iou = results.get('iou', None)
             proxy_chain = results.get('proxy_chain', None)
             
@@ -569,7 +599,7 @@ class ServerApp(object):
 
         d.addCallback(self._validateProxyUrl, pgturl, service, ticket, request)
         d.addCallback(getAvatar)
-        d.addCallback(renderSuccess)
+        d.addCallback(renderSuccess, ticket)
         d.addErrback(renderFailure, request)
         d.addErrback(self.page_views['error5xx'], request)
         return d        
@@ -733,15 +763,17 @@ class InMemoryTicketStore(object):
 
 
     def __init__(self, reactor=reactor, valid_service=None, 
-                    is_sso_service=None):
+                    is_sso_service=None, _debug=False):
         self.reactor = reactor
         self._tickets = {}
         self._delays = {}
         self.valid_service = valid_service or (lambda x:True)
         self.is_sso_service = is_sso_service or (lambda x: True)
+        self._debug = _debug
 
     def debug(self, msg):
-        log.msg(msg)
+        if self._debug:
+            log.msg(msg)
 
     def _validService(self, service):
         def cb(result):
