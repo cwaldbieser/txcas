@@ -8,10 +8,12 @@ from textwrap import dedent
 from urllib import urlencode
 
 #Application modules
+from txcas.interface import ITicketStore
 from txcas.server import escape_html
 
 # External modules
 from klein import Klein
+from twisted.plugin import getPlugins
 from twisted.web import microdom
 from twisted.web.client import getPage
 
@@ -89,6 +91,7 @@ class MyApp(object):
                 <li><a href="%(cas_root)s/login?service=%(service)s">Click here to login</a>.</li>
                 <li><a href="%(cas_root)s/login?service=%(service)s&renew=true">Click here to login, forcing the login page.</a>.</li>
                 <li><a href="%(cas_root)s/login?service=%(service)s&gateway=true">Click here to login, using SSO or failing.</a>.</li>
+                <li><a href="%(cas_root)s/login">Click here to login to an SSO session (no service)</a>.</li>
                 %(pgt_markup)s
                 <li><a href="%(cas_root)s/logout?service=%(logout_service)s">Click here to logout of your SSO session.</a>.</li>
             </ul>
@@ -431,13 +434,19 @@ class MyApp(object):
 
 # server
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
-from txcas.server import ServerApp, InMemoryTicketStore, UserRealm
+from txcas.server import ServerApp, UserRealm
 
 checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
 
 page_views = {'login': custom_login}
 #page_views = None
-server_app = ServerApp(InMemoryTicketStore(), UserRealm(), [checker], lambda x:True,
+
+# Choose first plugin that implements ITicketStore.
+ticket_store = None
+for ticket_store in getPlugins(ITicketStore):
+    break
+#Create the CAS server app.
+server_app = ServerApp(ticket_store, UserRealm(), [checker], lambda x:True,
                        requireSSL=False, page_views=page_views, validate_pgturl=False)
 
 
