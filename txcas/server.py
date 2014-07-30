@@ -21,7 +21,7 @@ import treq
 
 from twisted.cred.portal import Portal, IRealm
 from twisted.cred.credentials import UsernamePassword
-from twisted.cred.error import Unauthorized
+from twisted.cred.error import Unauthorized, UnauthorizedLogin
 from twisted.internet import defer, reactor
 from twisted.python import log
 import twisted.web.http
@@ -85,6 +85,22 @@ def log_cas_event(label, attribs):
         parts.append('''%s="%s"''' % (k, v))
     tail = ' '.join(parts)
     log.msg('''[INFO][CAS] label="%s" %s''' % (label, tail))
+
+def log_ticket_expiration(ticket, data, explicit):
+    """
+    """
+    if not explicit:
+        attribs = [('ticket', ticket)]
+        for key, label in [('service', 'service'), ('avatar_id', 'username'), 
+                            ('tgt', 'TGT'), ('pgt', 'PGT'), 
+                            ('primary_credentials', 'primary_credentials'),
+                            ('proxy_chain', 'proxy_chain')]:
+            if key in data:
+                val = data[key]
+                if key == 'proxy_chain':
+                    val = ', '.join(val)
+                attribs.append((key, data[key]))
+        log_cas_event("Ticket expired", attribs)
 
 def make_cas_attributes(attribs):
     """
@@ -193,6 +209,8 @@ class ServerApp(object):
             default_page_views.update(page_views)
             page_views = default_page_views
         self.page_views = page_views
+        
+        self.ticket_store.register_ticket_expiration_callback(log_ticket_expiration)
 
     @app.route('/login', methods=['GET'])
     def login_GET(self, request):
@@ -459,7 +477,7 @@ class ServerApp(object):
             # errors to the 5xx handler.
             # I am not sure what kind of errors the credentail checkers
             # will raise, though.
-            err.printTraceback(file=sys.stderr)
+            err.trap(Unauthorized)
             params = {}
             for argname, arglist in request.args.iteritems():
                 if argname in ('service', 'renew',):
@@ -804,42 +822,7 @@ class ServerApp(object):
         d.addErrback(failureResult, targetService, pgt, request)
         return d
 
-class User(object):
 
-    implements(ICASUser)
-
-    username = None
-    attribs = None
-    
-    def __init__(self, username, attribs):
-        self.username = username
-        self.attribs = attribs
-   
-    def logout(self):
-        pass 
-
-
-class UserRealm(object):
-
-
-    implements(IRealm)
-
-
-    def requestAvatar(self, avatarId, mind, *interfaces):
-        """
-        """
-        def cb():
-            if not ICASUser in interfaces:
-                raise NotImplementedError("This realm only implements ICASUser.")
-            attribs = [
-                ('email', "%s@lafayette.edu" % avatarId),
-                ('domain', 'lafayette.edu'),]
-            # ENHANCEMENT: This method can also return a deferred that returns
-            # (interface, avatar, logout).  Useful if reading user information
-            # from a database or LDAP directory.
-            avatar = User(avatarId, attribs)
-            return (ICASUser, avatar, avatar.logout)
-        return defer.maybeDeferred(cb)
 
 
 

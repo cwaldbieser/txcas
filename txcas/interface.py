@@ -58,5 +58,13 @@ class ITicketStore(Interface):
         """
         """
         
-    
+    def register_ticket_expiration_callback(callback):
+        """
+        Register a function to be called when a ticket is expired.
+        The function should take 3 arguments, (ticket, data, explicit).
+        `ticket` is the ticket ID, `data` is a dict of the ticket data,
+        and `explicit` is a boolean that indicates whether the ticket
+        was explicitly expired (e.g. /logout, ST/PT validation) or
+        implicitly expired (e.g. timeout or parent ticket expired).
+        """
     

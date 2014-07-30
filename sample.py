@@ -13,6 +13,7 @@ from txcas.server import escape_html
 
 # External modules
 from klein import Klein
+from twisted.cred.portal import IRealm
 from twisted.plugin import getPlugins
 from twisted.web import microdom
 from twisted.web.client import getPage
@@ -434,9 +435,8 @@ class MyApp(object):
 
 # server
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
-from txcas.server import ServerApp, UserRealm
-
-checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
+from twisted.cred.checkers import ICredentialsChecker
+from txcas.server import ServerApp
 
 page_views = {'login': custom_login}
 #page_views = None
@@ -445,8 +445,19 @@ page_views = {'login': custom_login}
 ticket_store = None
 for ticket_store in getPlugins(ITicketStore):
     break
+    
+# Choose the first plugin that implements ICredentialsChecker.
+checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
+for checker in getPlugins(ICredentialsChecker):
+    break
+
+# Choose the first plugin that implements IRealm.
+realm = None
+for realm in getPlugins(IRealm):
+    break
+
 #Create the CAS server app.
-server_app = ServerApp(ticket_store, UserRealm(), [checker], lambda x:True,
+server_app = ServerApp(ticket_store, realm, [checker], lambda x:True,
                        requireSSL=False, page_views=page_views, validate_pgturl=False)
 
 

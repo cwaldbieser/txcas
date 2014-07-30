@@ -1,14 +1,9 @@
+
+from twisted.cred.error import Unauthorized
+
 #------------------------------------------------------------------------------
 # REPLACE THIS STUFF WITH YOUR SPECIFICS
 #------------------------------------------------------------------------------
-def authorize(username, password):
-    """
-    Authorize the user "foo" for the password "password"
-    """
-    if username == 'foo' and password == 'password':
-        return username
-    raise Exception("Bad credentials")
-
 
 def valid_service(url):
     """
@@ -44,7 +39,6 @@ from txcas.service import CASService
 application = service.Application('txcas')
 cas_service = CASService(
                     ENDPOINT,
-                    authorize=authorize,
                     ticket_timeout=TICKET_TIMEOUT,
                     auth_timeout=AUTH_TIMEOUT,
                     valid_service=valid_service,

@@ -40,6 +40,7 @@ class InMemoryTicketStore(object):
         self.valid_service = valid_service or (lambda x:True)
         self.is_sso_service = is_sso_service or (lambda x: True)
         self._debug = _debug
+        self._expire_callback = (lambda ticket, data, explicit: None)
 
     def debug(self, msg):
         if self._debug:
@@ -88,9 +89,15 @@ class InMemoryTicketStore(object):
 
 
     def expireTicket(self, val):
+        """
+        This function should only be called when a ticket is expired via
+        a timeout or indirectly (e.g. TGT expires so derived PGTs are expired).
+        """
         try:
+            data = self._tickets[val]
             del self._tickets[val]
             del self._delays[val]
+            self._expire_callback(val, data, False)
         except KeyError:
             pass
         self.debug("Expired ticket '%s'." % val)
@@ -107,6 +114,7 @@ class InMemoryTicketStore(object):
             val = self._tickets[ticket]
             if _consume:
                 del self._tickets[ticket]
+                self._expire_callback(ticket, val, True)
                 self.debug("Consumed ticket '%s'." % ticket)
             else:
                 dc, timeout = self._delays[ticket]
@@ -115,8 +123,7 @@ class InMemoryTicketStore(object):
         except KeyError:
             return defer.fail(InvalidTicket())
         except Exception as ex:
-            sys.stderr.write(str(ex))
-            sys.stderr.write("\n")
+            log.err(ex)
             return defer.fail(InvalidTicket())
 
     def _informTGTOfService(self, st, service, tgt):
@@ -384,3 +391,14 @@ class InMemoryTicketStore(object):
             dlist.append(d)
         return defer.DeferredList(dlist, consumeErrors=True)
 
+    def register_ticket_expiration_callback(self, callback):
+        """
+        Register a function to be called when a ticket is expired.
+        The function should take 3 arguments, (ticket, data, explicit).
+        `ticket` is the ticket ID, `data` is a dict of the ticket data,
+        and `explicit` is a boolean that indicates whether the ticket
+        was explicitly expired (e.g. /logout, ST/PT validation) or
+        implicitly expired (e.g. timeout or parent ticket expired).
+        """
+        self._expire_callback = callback
+        
