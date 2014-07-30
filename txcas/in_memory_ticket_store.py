@@ -5,6 +5,7 @@ import random
 import string
 from textwrap import dedent
 import uuid
+from xml.sax.saxutils import escape as xml_escape
 
 # Application modules
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
@@ -12,6 +13,7 @@ from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
 from txcas.interface import ITicketStore
 
 # External modules
+import treq
 from twisted.internet import defer, reactor
 from twisted.plugin import IPlugin
 from twisted.python import log

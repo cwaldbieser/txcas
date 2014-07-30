@@ -495,7 +495,13 @@ class ServerApp(object):
             request.addCookie(
                 self.cookie_name, '', expires='Thu, 01 Jan 1970 00:00:00 GMT')
             #Expire the ticket.
+            def log_ticket_expired(result, tgc, request):
+                log_cas_event("Explicitly logged out of SSO", [
+                    ('client_ip', request.getClientIP()),
+                    ('TGC', tgc)])
+                return result
             d = self.ticket_store.expireTGT(tgc)
+            d.addCallback(log_ticket_expired, tgc, request)
         else:
             d = defer.maybeDeferred(lambda : None)
 
