@@ -7,7 +7,6 @@ import sys
 from textwrap import dedent
 from urllib import urlencode
 import urlparse
-import uuid
 from xml.sax.saxutils import escape as xml_escape
 
 #Application modules

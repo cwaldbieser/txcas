@@ -4,6 +4,7 @@ import datetime
 import random
 import string
 from textwrap import dedent
+import uuid
 
 # Application modules
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
