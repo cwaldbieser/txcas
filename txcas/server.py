@@ -85,7 +85,7 @@ def log_cas_event(label, attribs):
     for k,v in attribs:
         parts.append('''%s="%s"''' % (k, v))
     tail = ' '.join(parts)
-    log.msg('''[INFO][CAS] label="%s %s''' % (label, tail))
+    log.msg('''[INFO][CAS] label="%s" %s''' % (label, tail))
 
 def make_cas_attributes(attribs):
     """
