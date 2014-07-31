@@ -2,10 +2,9 @@
 # Application modules
 import txcas.settings
 
-_scp = txcas.settings.load_settings('cas', syspath='/etc/cas', defaults={
-        'PLUGINS': {'cred_checker': 'DemoChecker'}})
+_scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
 
-if _scp.get('PLUGINS', 'cred_checker') == 'LDAPSimpleBindChecker':
+if txcas.settings.has_options(_scp, {'LDAP': ['host', 'port', 'basedn', 'binddn', 'bindpw']}):
     from txcas.ldap_cred_checker import LDAPSimpleBindChecker
     ldap_simple_bind_cred_checker = LDAPSimpleBindChecker(
                                     host=_scp.get('LDAP', 'host'),

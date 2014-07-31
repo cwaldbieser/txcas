@@ -1,6 +1,7 @@
 
 # Standard library
 import datetime
+import json
 import random
 import string
 from textwrap import dedent
@@ -13,6 +14,7 @@ from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
 from txcas.interface import ITicketStore
 
 # External modules
+from dateutil.parser import parse as parse_date
 import treq
 from twisted.internet import defer, reactor
 from twisted.plugin import IPlugin
@@ -20,29 +22,40 @@ from twisted.python import log
 from zope.interface import implements
 
 
-class InMemoryTicketStore(object):
+class CouchDBTicketStore(object):
     """
-    A ticket store that exists entirely in system memory.
+    A ticket store that uses an external CouchDB.
     """
     implements(IPlugin, ITicketStore)
 
     lifespan = 10
-    lt_lifespan = 60 * 5
     cookie_lifespan = 60 * 60 * 24 * 2
     pgt_lifespan = 60 * 60 * 2
+    lt_lifespan = 60*5
     charset = string.ascii_letters + string.digits + '-'
+    poll_expired = 60 * 5
 
 
-    def __init__(self, reactor=reactor, valid_service=None, 
-                    is_sso_service=None, _debug=False):
+    def __init__(self, couch_host, couch_port, couch_db,
+                couch_user, couch_passwd, use_https=True,
+                reactor=reactor, valid_service=None, 
+                is_sso_service=None, _debug=False):
         self.reactor = reactor
-        self._tickets = {}
-        self._delays = {}
         self.valid_service = valid_service or (lambda x:True)
         self.is_sso_service = is_sso_service or (lambda x: True)
         self._debug = _debug
+        self._debug = True
         self._expire_callback = (lambda ticket, data, explicit: None)
-
+        self._couch_host = couch_host
+        self._couch_port = couch_port
+        self._couch_db = couch_db
+        self._couch_user = couch_user
+        self._couch_passwd = couch_passwd
+        if use_https:
+            self._scheme = 'https://'
+        else:
+            self._scheme = 'http://'
+        
     def debug(self, msg):
         if self._debug:
             log.msg(msg)
@@ -77,33 +90,115 @@ class InMemoryTicketStore(object):
         @param data: Data associated with this ticket (which will be returned
             when L{_useTicket} is called).
         """
+        self.debug("_mkTicket()")
         timeout = _timeout or self.lifespan
         ticket = self._generate(prefix)
-        self._tickets[ticket] = data
-        self.debug("Added ticket '%s' with data: %s" % (ticket, str(data)))
-        if prefix == 'TGC-':
-            dc = self.reactor.callLater(timeout, self.expireTGT, ticket)
-        else:
-            dc = self.reactor.callLater(timeout, self.expireTicket, ticket)
-        self._delays[ticket] = (dc, timeout)
-        return defer.succeed(ticket)
+        data['ticket_id'] = ticket
+        expires = datetime.datetime.today() + datetime.timedelta(seconds=timeout)
+        data['expires'] = expires.strftime('%Y-%m-%dT%H:%M:%S')
+        if 'pgts' in data:
+            data['pgts'] = list(data['pgts'])
+        
+        url = '''%(scheme)s%(host)s:%(port)s/%(db)s''' % {
+            'scheme': self._scheme,
+            'host': self._couch_host,
+            'port': self._couch_port,
+            'db': self._couch_db}
+        doc = json.dumps(data)
+        self.debug("_mkTicket(): url: %s" % url)
+        self.debug("_mkTicket(): doc: %s" % doc)
+        
+        def return_ticket(result, ticket, data):
+            self.debug("Added ticket '%s' with data: %s" % (ticket, str(data)))
+            return ticket
+            
+        d = treq.post(url, data=doc, auth=(self._couch_user, self._couch_passwd),
+                        headers={'Accept': 'application/json', 'Content-Type': 'application/json'})
+        d.addCallback(treq.content)
+        d.addCallback(return_ticket, ticket, data)
+        
+        return d
 
+    @defer.inlineCallbacks
+    def _fetch_ticket(self, ticket):
+        """
+        Fetch a ticket representation from CouchDB.
+        """
+        url = '''%(scheme)s%(host)s:%(port)s/%(db)s/_design/views/_view/get_ticket''' % {
+            'scheme': self._scheme,
+            'host': self._couch_host,
+            'port': self._couch_port,
+            'db': self._couch_db}
+        params = {'key': json.dumps(ticket)}
+        response = yield treq.get(url, 
+                    params=params, 
+                    headers={'Accept': 'application/json'},
+                    auth=(self._couch_user, self._couch_passwd))
+        doc = yield treq.json_content(response)
+        self.debug("_fetch_ticket(): doc:\n%s" % str(doc))
+        if doc['total_rows'] > 0:
+            entry = doc['rows'][0]
+            entry['expires'] = parse_date(entry['expires'])
+            if 'pgts' in entry:
+                entry['pgts'] = set(entry['pgts'])
+                defer.returnValue(entry)
+        defer.returnValue(None)
 
-    def expireTicket(self, val):
+    @defer.inlineCallbacks
+    def _update_ticket(self, _id, entry):
+        """
+        Update a ticket in CouchDB.
+        """
+        expires = datetime.datetime.today() + datetime.timedelta(seconds=timeout)
+        data['expires'] = data['expires'].strftime('%Y-%m-%dT%H:%M:%S')
+        if 'pgts' in data:
+            data['pgts'] = list(data['pgts'])
+        url = '''%(scheme)s%(host)s:%(port)s/%(db)s/%(docid)s''' % {
+            'scheme': self._scheme,
+            'host': self._couch_host,
+            'port': self._couch_port,
+            'db': self._couch_db,
+            'docid': _id}
+        doc = json.dumps(entry)
+        response = yield treq.put(url, data=doc, headers={
+            'Accept': 'application/json', 'Content-Type': 'application/json'})
+        doc = yield treq.json_content(response)
+        defer.returnValue(None)
+
+    @defer.inlineCallbacks
+    def _delete_ticket(self, _id, _rev):
+        """
+        Delete a ticket from CouchDB.
+        """
+        url = '''%(scheme)s%(host)s:%(port)s/%(db)s/%(docid)s''' % {
+            'scheme': self._scheme,
+            'host': self._couch_host,
+            'port': self._couch_port,
+            'db': self._couch_db,
+            'docid': _id}
+        params = {'rev': _rev}
+        response = yield treq.delete(url, params=params, headers={'Accept': 'application/json'})
+        yield treq.content(response)
+        defer.returnValue(None)
+
+    @defer.inlineCallbacks
+    def _expireTicket(self, val):
         """
         This function should only be called when a ticket is expired via
         a timeout or indirectly (e.g. TGT expires so derived PGTs are expired).
         """
-        try:
-            data = self._tickets[val]
-            del self._tickets[val]
-            del self._delays[val]
-            self._expire_callback(val, data, False)
-        except KeyError:
-            pass
+        entry = yield self._fetch_ticket(val)
+        if entry is not None:
+            _id = entry['_id']
+            _rev = entry['_rev']
+            del entry['_id']
+            del entry['_rev']
+            yield self._delete_ticket(_id, _rev)
+            yield self._expire_callback(val, entry, False)
         self.debug("Expired ticket '%s'." % val)
+        defer.returnValue(None)
 
-
+    @defer.inlineCallbacks
     def _useTicket(self, ticket, _consume=True):
         """
         Consume a ticket, producing the data that was associated with the ticket
@@ -111,35 +206,59 @@ class InMemoryTicketStore(object):
 
         @raise InvalidTicket: If the ticket doesn't exist or is no longer valid.
         """
-        try:
-            val = self._tickets[ticket]
+        
+        entry = yield self._fetch_ticket(ticket)
+        if entry is not None:
+            _id = entry['_id']
+            _rev = entry['_rev']
+            expires = entry['expires']
+            now = datetime.datetime.today()
+            if now >= expires:
+                raise InvalidTicket("Ticket has expired.")
+            del entry['_id']
+            del entry['_rev']
             if _consume:
-                del self._tickets[ticket]
-                self._expire_callback(ticket, val, True)
-                self.debug("Consumed ticket '%s'." % ticket)
+                yield self._delete_ticket(_id, _rev)
+                yield self._expire_callback(ticket, entry, True)
             else:
-                dc, timeout = self._delays[ticket]
-                dc.reset(timeout)
-            return defer.succeed(val)
-        except KeyError:
-            return defer.fail(InvalidTicket())
-        except Exception as ex:
-            log.err(ex)
-            return defer.fail(InvalidTicket())
+                if ticket.startswith('PT-'):
+                    timeout = self.lifespan
+                elif ticket.startwith('ST-'):
+                    timeout = self.lifespan
+                elif ticket.startswith('LT-'):
+                    timeout = self.lt_lifespan
+                elif ticket.startswith('PGT-'):
+                    timeout = self.pgt_lifespan
+                elif ticket.startswith('TGC-'):
+                    timeout = self.cookie_lifespan
+                else:
+                    timeout = 10
+                now = datetime.datetime.today()
+                entry['expires'] = now + datetime.timedelta(timeout)
+                yield self._update_ticket(_id, entry)
+            defer.returnValue(entry)
+        else:
+            raise InvalidTicket("Ticket '%s' does not exist." % ticket)
 
+    @defer.inlineCallbacks
     def _informTGTOfService(self, st, service, tgt):
         """
         Record in the TGT that a service has requested an ST.
         """
-        try:
-            data = self._tickets[tgt]
-        except KeyError:
-            return defer.fail(InvalidTicket())
-        services = data.setdefault('services', {})
-        services[service] = st
-        self.debug("Added service '%s' to TGT '%s' with ST '%s'." % (service, tgt, st))
-        return st
         
+        entry = yield self._fetch_ticket(tgt)
+        if entry is None:
+            raise InvalidTicket("Ticket '%s' does not exist." % tgt)
+        _id = entry['_id']
+        del entry['_id']
+        del entry['_rev']
+        services = entry.setdefault('services', {})
+        services[service] = st
+        yield self._update_ticket(_id, entry)
+        self.debug("Added service '%s' to TGT '%s' with ST '%s'." % (service, tgt, st))
+        defer.returnValue(st)
+        
+    @defer.inlineCallbacks
     def _informTGTOfPGT(self, pgt, tgt):
         """
         Record in the TGT that a service has requested an ST.
@@ -148,15 +267,17 @@ class InMemoryTicketStore(object):
             raise InvalidTicket("PGT '%s' is not valid." % pgt)
         if not tgt.startswith("TGC-"):
             raise InvalidTicket("TGT '%s' is not valid." % tgt)
-            
-        try:
-            data = self._tickets[tgt]
-        except KeyError:
-            return defer.fail(InvalidTicket())
-        pgts = data.setdefault('pgts', set([]))
+        entry = yield self._fetch_ticket(tgt)
+        if entry is None:
+            raise InvalidTicket("Ticket '%s' does not exist." % tgt)
+        _id = entry['_id']
+        del entry['_id']
+        del entry['_rev']
+        pgts = entry.setdefault('pgts', set([]))
         pgts.add(pgt)
+        yield self._update_ticket(_id, entry)
         self.debug("Added PGT '%s' to TGT '%s'." % (pgt, tgt))
-        return pgt
+        defer.returnValue(pgt)
 
     def mkLoginTicket(self, service):
         """
@@ -184,31 +305,27 @@ class InMemoryTicketStore(object):
             return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
 
-
+    @defer.inlineCallbacks
     def mkServiceTicket(self, service, tgt_id, primaryCredentials):
         """
         Create a service ticket
         """
         if not tgt_id.startswith("TGC-"):
             raise InvalidTicket()
-        try:
-            tgt = self._tickets[tgt_id]
-        except KeyError:
+        entry = yield self._fetch_ticket(tgt_id)
+        if entry is None:
             raise InvalidTicket("Invalid TGT '%s'." % tgt_id)
-            
-        def doit(_):
-            return self._mkTicket('ST-', {
+        del entry['_id']
+        del entry['_rev']
+        yield self._validService(service)
+        ticket = yield self._mkTicket('ST-', {
                 'avatar_id': tgt['avatar_id'],
                 'service': service,
                 'primary_credentials': primaryCredentials,
                 'tgt': tgt_id,
             })
-        d = self._validService(service)
-        d.addCallback(doit)
-        d.addCallback(self._informTGTOfService, service, tgt_id)
-        
-        return d
-
+        yield self._informTGTOfService(ticket, service, tgt_id)
+        defer.returnValue(ticket)  
 
     def useServiceTicket(self, ticket, service, requirePrimaryCredentials=False):
         """
@@ -216,6 +333,7 @@ class InMemoryTicketStore(object):
         """
         return self._useServiceOrProxyTicket(ticket, service, requirePrimaryCredentials)
 
+    @defer.inlineCallbacks
     def mkProxyTicket(self, service, pgt):
         """
         Create a proxy ticket
@@ -223,20 +341,16 @@ class InMemoryTicketStore(object):
         if not pgt.startswith("PGT-"):
             raise InvalidTicket()
 
-        try:
-            pgt_info = self._tickets[pgt]
-        except KeyError:
+        pgt_info = yield self._fetch_ticket(pgt)
+        if pgt_info is None:
             raise InvalidTicket("PGT '%s' is invalid." % pgt)
         pgturl = pgt_info['pgturl']
-
         try:
             tgt = pgt_info['tgt']
         except KeyError:
             raise InvalidTicket("PGT '%s' is invalid." % pgt)
-
-            
-        def doit(_):
-            return self._mkTicket('PT-', {
+        yield self._validService(service)
+        pt = self._mkTicket('PT-', {
                 'avatar_id': pgt_info['avatar_id'],
                 'service': service,
                 'primary_credentials': False,
@@ -245,11 +359,8 @@ class InMemoryTicketStore(object):
                 'tgt': tgt,
                 'proxy_chain': pgt_info['proxy_chain'],
             })
-        d = self._validService(service)
-        d.addCallback(doit)
-        d.addCallback(self._informTGTOfService, service, tgt)
-        
-        return d
+        yield self._informTGTOfService(pt, service, tgt)
+        defer.returnValue(pt)
 
     def useServiceOrProxyTicket(self, ticket, service, requirePrimaryCredentials=False):
         """
@@ -276,43 +387,39 @@ class InMemoryTicketStore(object):
             return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
 
+    @defer.inlineCallbacks
     def mkProxyGrantingTicket(self, service, ticket, tgt, pgturl, proxy_chain=None):
         """
         Create Proxy Granting Ticket
         """
         if not (ticket.startswith("ST-") or ticket.startswith("PT-")):
             raise InvalidTicket()
-        
-        try:
-            tgt_info = self._tickets[tgt]
-        except KeyError:
+        tgt_info = self._fetch_ticket(tgt)
+        if tgt_info is None:
             raise InvalidTicket("TGT '%s' is invalid." % tgt)
-        
-        def doit(_):
-            charset = self.charset
-            iou = 'PGTIOU-' + (''.join([random.choice(charset) for n in range(256)]))
-            data = {
-                'avatar_id': tgt_info['avatar_id'],
-                'service': service,
-                'st_or_pt': ticket,
-                'iou': iou,
-                'tgt': tgt,
-                'pgturl': pgturl,
-            }
-            if proxy_chain is not None:
-                new_proxy_chain = list(proxy_chain)
-                new_proxy_chain.append(pgturl)
-            else:
-                new_proxy_chain = [pgturl]
-            data['proxy_chain'] = new_proxy_chain 
-        
-            return self._mkTicket('PGT-', data, _timeout=self.pgt_lifespan).addCallback(
-                self._informTGTOfPGT, tgt).addCallback(
-                lambda pgt : {'iou': iou, 'pgt': pgt})
-        
-        d = self._validService(service)
-        d.addCallback(doit)
-        return d
+        del tgt_info['_id']
+        del tgt_info['_rev']
+        yield self._validateService(service)
+        charset = self.charset
+        iou = 'PGTIOU-' + (''.join([random.choice(charset) for n in range(256)]))
+        data = {
+            'avatar_id': tgt_info['avatar_id'],
+            'service': service,
+            'st_or_pt': ticket,
+            'iou': iou,
+            'tgt': tgt,
+            'pgturl': pgturl,
+        }
+        if proxy_chain is not None:
+            new_proxy_chain = list(proxy_chain)
+            new_proxy_chain.append(pgturl)
+        else:
+            new_proxy_chain = [pgturl]
+        data['proxy_chain'] = new_proxy_chain 
+    
+        pgt = yield self._mkTicket('PGT-', data, _timeout=self.pgt_lifespan)
+        yield self._informTGTOfPGT(pgt, tgt)
+        defer.returnValue({'iou': iou, 'pgt': pgt})
 
     def mkTicketGrantingCookie(self, avatar_id):
         """
@@ -353,7 +460,7 @@ class InMemoryTicketStore(object):
             #PGTs
             pgts = data.get('pgts', {})
             for pgt in pgts:
-                self.expireTicket(pgt)
+                self._expireTicket(pgt)
             return None
             
         def eb(failure):

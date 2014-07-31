@@ -9,6 +9,11 @@ class ICASUser(Interface):
 
 class ITicketStore(Interface):
     
+    lifespan = Attribute('ST/PT lifespan in seconds.')
+    lt_lifespan = Attribute('LT lifespan in seconds.')
+    cookie_lifespan = Attribute('TGC lifespan in seconds.')
+    pgt_lifespan = Attribute('PGT lifespan in seconds.')
+    
     def mkLoginTicket(service):
         """
         Make a login ticket.

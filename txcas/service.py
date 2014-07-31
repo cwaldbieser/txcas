@@ -2,6 +2,7 @@
 # Application modules
 from txcas.interface import ITicketStore
 from txcas.server import ServerApp
+import txcas.settings
 
 # External modules
 from twisted.application.service import Service
@@ -10,7 +11,6 @@ from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
 from twisted.cred.portal import IRealm
 from twisted.internet import reactor
 from twisted.internet.endpoints import serverFromString
-from twisted.plugin import getPlugins
 from twisted.web.server import Site
 
 
@@ -24,22 +24,29 @@ class CASService(Service):
                 page_views=None, validate_pgturl=True):
         self.port_s = endpoint_s
 
-        # Choose the first plugin that implements IRealm.
-        realm = None
-        for realm in getPlugins(IRealm):
-            break
+        # Load the config.
+        scp = txcas.settings.load_settings('cas', syspath='/etc/cas', defaults={
+                'PLUGINS': {
+                    'cred_checker': 'DemoChecker',
+                    'realm': 'DemoRealm',
+                    'ticket_store': 'InMemoryTicketStore'}})
 
-        #Load first ticket store plugin.
-        ticket_store = None
-        for ticket_store in getPlugins(ITicketStore):
-            break
-        ticket_store.lifespan = ticket_timeout
-        ticket_store.cookie_lifespan = auth_timeout
+        # Choose plugin that implements ITicketStore.
+        ticket_store = txcas.settings.get_plugin(
+                scp.get('PLUGINS', 'ticket_store'), ITicketStore)
+        assert ticket_store is not None, "Ticket Store has not been configured!"
 
-        # Choose the first plugin that implements ICredentialsChecker.
-        checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
-        for checker in getPlugins(ICredentialsChecker):
-            break
+            
+        # Choose the plugin that implements ICredentialsChecker.
+        checker = txcas.settings.get_plugin(
+                scp.get('PLUGINS', 'cred_checker'), ICredentialsChecker)
+        if checker is None:
+            checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
+
+        # Choose the plugin that implements IRealm.
+        realm = txcas.settings.get_plugin(
+                scp.get('PLUGINS', 'realm'), IRealm)
+        assert realm is not None, "User Realm has not been configured!"
         
         app = ServerApp(ticket_store, realm, [checker],
                         lambda x:True, requireSSL=requireSSL,
