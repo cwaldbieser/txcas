@@ -1,4 +1,8 @@
 
+# Application modules
+import txcas.settings
+
+# External modules
 from twisted.cred.error import Unauthorized
 
 #------------------------------------------------------------------------------
@@ -30,8 +34,6 @@ PAGE_VIEWS = None
 # Validate the pgtUrl callback.  Only set to False for development.
 VALIDATE_PGTURL = True
 #------------------------------------------------------------------------------
-
-
 
 from twisted.application import service
 from txcas.service import CASService

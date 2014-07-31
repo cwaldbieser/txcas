@@ -187,6 +187,12 @@ class ServerApp(object):
             peer.  Useful to set to False for development purposes.
                  
         """
+        assert ticket_store is not None, "No Ticket Store was configured."
+        assert realm is not None, "No Realm was configured."
+        assert len(checkers) > 0, "No Credential Checkers were configured."
+        for n, checker in enumerate(checkers):
+            assert checker is not None, "Credential Checker #%d was not configured." % n
+        
         self.cookies = {}
         self.ticket_store = ticket_store
         self.portal = Portal(realm)
@@ -477,7 +483,8 @@ class ServerApp(object):
             # errors to the 5xx handler.
             # I am not sure what kind of errors the credentail checkers
             # will raise, though.
-            err.trap(Unauthorized)
+            if not err.check(Unauthorized):
+                log.err(err)
             params = {}
             for argname, arglist in request.args.iteritems():
                 if argname in ('service', 'renew',):

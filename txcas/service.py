@@ -6,6 +6,7 @@ from txcas.server import ServerApp
 # External modules
 from twisted.application.service import Service
 from twisted.cred.checkers import ICredentialsChecker
+from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
 from twisted.cred.portal import IRealm
 from twisted.internet import reactor
 from twisted.internet.endpoints import serverFromString
@@ -36,7 +37,7 @@ class CASService(Service):
         ticket_store.cookie_lifespan = auth_timeout
 
         # Choose the first plugin that implements ICredentialsChecker.
-        checker = None
+        checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
         for checker in getPlugins(ICredentialsChecker):
             break
         
