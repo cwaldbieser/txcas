@@ -39,3 +39,10 @@ If you point your browser to service 2, your SSO session (provided by
 the CAS ticket granting cookie (TGC) will have transparently allowed
 you to log into the second service without having to re-enter crdentials.
 
+Plugins
+-------
+Various plugins exist for Credential Checkers, User Realms, and Ticket Stores.
+These are configured in :file:`cas.cfg`.  Some plugins require additional
+dependencies.  E.g. the LDAP-based plugins require ldaptor 
+(https://github.com/twisted/ldaptor).
+
