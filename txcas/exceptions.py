@@ -14,6 +14,8 @@ class InvalidTicket(CASError):
 class InvalidService(CASError):
     pass
 
+class InvalidProxyCallback(CASError):
+    pass
 
 class CookieAuthFailed(CASError):
     pass

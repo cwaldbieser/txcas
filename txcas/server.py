@@ -11,8 +11,10 @@ from xml.sax.saxutils import escape as xml_escape
 
 #Application modules
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
-                        CookieAuthFailed, NotSSOService, NotHTTPSError
+                        CookieAuthFailed, NotSSOService, NotHTTPSError, \
+                        InvalidProxyCallback
 from txcas.interface import ICASUser, ITicketStore
+from txcas.utils import http_status_filter
 
 #External modules
 from klein import Klein
@@ -693,15 +695,22 @@ class ServerApp(object):
             log_cas_event("Failed to validate ticket.", [
                 ('client_ip', request.getClientIP()),
                 ('ticket', ticket)])
-            err.trap(InvalidTicket)
+            err.trap(InvalidTicket, InvalidProxyCallback, InvalidService)
             request.setResponseCode(403)
+            code = "INVALID_TICKET"
+            if err.check(InvalidProxyCallback):
+                code = "INVALID_PROXY_CALLBACK"
+            elif err.check(InvalidService):
+                code = "INVALID_SERVICE"
             doc_fail = dedent("""\
                 <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
-                   <cas:authenticationFailure code="INVALID_TICKET">
-                      Ticket %s not recognized`    
+                   <cas:authenticationFailure code="%(code)s">
+                      Validation failed for ticket %(ticket)s.    
                    </cas:authenticationFailure>
                 </cas:serviceResponse>
-                """) % xml_escape(ticket)
+                """) % {
+                    'code': xml_escape(code),
+                    'ticket': xml_escape(ticket),}
             return doc_fail
 
         d.addCallback(self._validateProxyUrl, pgturl, service, ticket, request)
@@ -760,6 +769,7 @@ class ServerApp(object):
                 
             q = {'pgtId': pgt, 'pgtIou': iou}
             d = treq.get(pgturl, params=q, timeout=30)
+            d.addCallback(http_status_filter, [(200, 200)], InvalidProxyCallback)
             d.addCallback(treq.content)
             d.addCallback(iou_cb, iou)
             return d
@@ -776,6 +786,7 @@ class ServerApp(object):
             # verified in this case.
         
         d = treq.get(pgturl)
+        d.addCallback(http_status_filter, [(200, 200)], InvalidProxyCallback)
         d.addCallback(treq.content)
         
         d.addCallback(_mkPGT)
