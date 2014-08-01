@@ -22,6 +22,43 @@ from twisted.python import log
 from zope.interface import implements
 
 
+class CouchDBError(Exception):
+    pass
+
+def http_status_filter(response, allowed, ex, msg=None, include_resp_text=True):
+    """
+    Checks the response status and determines if it is in one of the
+    allowed ranges.  If not, it raises `ex()`.
+
+    `ex` is a callable that results in an Exception to be raised,
+        (typically an exception class).
+    `allowed` is a sequence of (start, end) valid status ranges.
+    """
+    code = response.code
+    in_range = False
+    for start_range, end_range in allowed:
+        if code >= start_range and code <= end_range:
+            in_range = True
+            break
+    if not in_range:
+        def raise_error(body, ex):
+            ex_msg = [] 
+            if msg is not None:
+                ex_msg.append(msg)
+            if include_resp_text:
+                ex_msg.append(body)
+            text = '\n'.join(ex_msg)
+            if text != "":
+                raise ex(text)
+            else:
+                raise ex()
+        # Need to still deliver the response body or Twisted make
+        # hang.
+        d = treq.content(response)
+        d.addCallback(raise_error, ex)
+        return d
+    return response
+
 class CouchDBTicketStore(object):
     """
     A ticket store that uses an external CouchDB.
@@ -90,7 +127,6 @@ class CouchDBTicketStore(object):
         @param data: Data associated with this ticket (which will be returned
             when L{_useTicket} is called).
         """
-        self.debug("_mkTicket()")
         timeout = _timeout or self.lifespan
         ticket = self._generate(prefix)
         data['ticket_id'] = ticket
@@ -106,15 +142,16 @@ class CouchDBTicketStore(object):
             'db': self._couch_db}
         url = url.encode('utf-8')
         doc = json.dumps(data)
-        self.debug("_mkTicket(): url: %s" % url)
-        self.debug("_mkTicket(): doc: %s" % doc)
+
+        self.debug("[DEBUG][CouchDB] _mkTicket(): url: %s" % url)
+        self.debug("[DEBUG][CouchDB] _mkTicket(): doc: %s" % doc)
         
         def return_ticket(result, ticket, data):
-            self.debug("Added ticket '%s' with data: %s" % (ticket, str(data)))
             return ticket
             
         d = treq.post(url, data=doc, auth=(self._couch_user, self._couch_passwd),
                         headers={'Accept': 'application/json', 'Content-Type': 'application/json'})
+        d.addCallback(http_status_filter, [(201,201)], CouchDBError)
         d.addCallback(treq.content)
         d.addCallback(return_ticket, ticket, data)
         
@@ -132,24 +169,23 @@ class CouchDBTicketStore(object):
             'db': self._couch_db}
         url = url.encode('utf-8')
         params = {'key': json.dumps(ticket.encode('utf-8'))}
-        self.debug("_fetch_ticket(), url: %s" % url)
-        self.debug("_fetch_ticket(), params: %s" % str(params))
+
+        self.debug("[DEBUG][CouchDB] _fetch_ticket(), url: %s" % url)
+        self.debug("[DEBUG][CouchDB] _fetch_ticket(), params: %s" % str(params))
+
         response = yield treq.get(url, 
                     params=params, 
                     headers={'Accept': 'application/json'},
                     auth=(self._couch_user, self._couch_passwd))
+        response = yield http_status_filter(response, [(200,200)], CouchDBError)
         doc = yield treq.json_content(response)
-        self.debug("_fetch_ticket(): doc:\n%s" % str(doc))
         rows = doc[u'rows']
         if len(rows) > 0:
-            self.debug("_fetch_ticket(): rows found.")
             entry = rows[0][u'value']
             entry[u'expires'] = parse_date(entry[u'expires'])
             if u'pgts' in entry:
                 entry[u'pgts'] = set(entry[u'pgts'])
-            self.debug("_fetch_ticket(): returning an entry...")
             defer.returnValue(entry)
-        self.debug("_fetch_ticket(): no rows found.")
         defer.returnValue(None)
 
     @defer.inlineCallbacks
@@ -170,12 +206,16 @@ class CouchDBTicketStore(object):
         params = {
             'rev': _rev.encode('utf-8')
         }
-        self.debug("_update_ticket(), url: %s" % url)
+
+        self.debug("[DEBUG][CouchDB] _update_ticket(), url: %s" % url)
+        self.debug("[DEBUG][CouchDB] _update_ticket(), params: %s" % str(params))
+
         try:
             doc = json.dumps(data)
         except Exception as ex:
-            self.debug("Failed to serialze doc:\n%s" % (str(data)))
+            self.debug("[DEBUG][CouchDB] Failed to serialze doc:\n%s" % (str(data)))
             raise
+
         response = yield treq.put(
                             url, 
                             params=params,
@@ -184,8 +224,8 @@ class CouchDBTicketStore(object):
                             headers={
                                 'Accept': 'application/json', 
                                 'Content-Type': 'application/json'})
+        response = yield http_status_filter(response, [(201,201)], CouchDBError)
         doc = yield treq.json_content(response)
-        self.debug("_update_ticket(), response:\n%s" % str(doc))
         defer.returnValue(None)
 
     @defer.inlineCallbacks
@@ -201,15 +241,17 @@ class CouchDBTicketStore(object):
             'docid': _id}
         url = url.encode('utf-8')
         params = {'rev': _rev}
-        self.debug('_delete_ticket(), url: %s' % url)
-        self.debug('_delete_ticket(), params: %s' % str(params))
+
+        self.debug('[DEBUG][CouchDB] _delete_ticket(), url: %s' % url)
+        self.debug('[DEBUG][CouchDB] _delete_ticket(), params: %s' % str(params))
+
         response = yield treq.delete(
                             url,
                             params=params, 
                             auth=(self._couch_user, self._couch_passwd),
                             headers={'Accept': 'application/json'})
+        response = yield http_status_filter(response, [(200,200)], CouchDBError)
         resp_text = yield treq.content(response)
-        self.debug('_delete_ticket(), resp_text: %s' % resp_text)
         defer.returnValue(None)
 
     @defer.inlineCallbacks
@@ -226,7 +268,6 @@ class CouchDBTicketStore(object):
             del entry[u'_rev']
             yield self._delete_ticket(_id, _rev)
             yield self._expire_callback(val, entry, False)
-        self.debug("Expired ticket '%s'." % val)
         defer.returnValue(None)
 
     @defer.inlineCallbacks
@@ -237,51 +278,35 @@ class CouchDBTicketStore(object):
 
         @raise InvalidTicket: If the ticket doesn't exist or is no longer valid.
         """
-        self.debug("_useTicket()") 
-        self.debug("_useTicket(), ticket '%s'" % ticket) 
         entry = yield self._fetch_ticket(ticket)
-        self.debug("_useTicket(), entry: %s" % str(entry))
         if entry is not None:
             _id = entry[u'_id']
             _rev = entry[u'_rev']
             expires = entry[u'expires']
             now = datetime.datetime.today()
-            self.debug("_useTicket(): now: %s, exipres: %s" % (now, expires))
             if now >= expires:
-                self.debug("_useTicket(), ticket expired.") 
                 raise InvalidTicket("Ticket has expired.")
-            self.debug("_useTicket(), deleting some attributes ...") 
             del entry[u'_id']
             del entry[u'_rev']
             if _consume:
-                self.debug("_useTicket(), consuming ...")
                 yield self._delete_ticket(_id, _rev)
                 yield self._expire_callback(ticket, entry, True)
             else:
-                self.debug("_useTicket(), computing updated timeout ...") 
-                try:
-                    if ticket.startswith(u'PT-'):
-                        timeout = self.lifespan
-                    elif ticket.startswith(u'ST-'):
-                        timeout = self.lifespan
-                    elif ticket.startswith(u'LT-'):
-                        timeout = self.lt_lifespan
-                    elif ticket.startswith(u'PGT-'):
-                        timeout = self.pgt_lifespan
-                    elif ticket.startswith(u'TGC-'):
-                        timeout = self.cookie_lifespan
-                    else:
-                        timeout = 10
-                except Exception as ex:
-                    self.debug(str(ex))
-                self.debug("_useTicket(), timeout: %s" % timeout) 
-                self.debug("_useTicket(), getting now ...") 
+                if ticket.startswith(u'PT-'):
+                    timeout = self.lifespan
+                elif ticket.startswith(u'ST-'):
+                    timeout = self.lifespan
+                elif ticket.startswith(u'LT-'):
+                    timeout = self.lt_lifespan
+                elif ticket.startswith(u'PGT-'):
+                    timeout = self.pgt_lifespan
+                elif ticket.startswith(u'TGC-'):
+                    timeout = self.cookie_lifespan
+                else:
+                    timeout = 10
                 now = datetime.datetime.today()
-                self.debug("_useTicket(), creating new expires attrib ...") 
                 expires = now + datetime.timedelta(seconds=timeout)
-                self.debug("_useTicket(), assigning new expires attrib ...") 
                 entry[u'expires'] = expires
-                self.debug("_useTicket(), getting ready to update ticket.") 
                 yield self._update_ticket(_id, _rev, entry)
             defer.returnValue(entry)
         else:
@@ -292,7 +317,6 @@ class CouchDBTicketStore(object):
         """
         Record in the TGT that a service has requested an ST.
         """
-        
         entry = yield self._fetch_ticket(tgt)
         if entry is None:
             raise InvalidTicket("Ticket '%s' does not exist." % tgt)
@@ -303,7 +327,6 @@ class CouchDBTicketStore(object):
         services = entry.setdefault('services', {})
         services[service] = st
         yield self._update_ticket(_id, _rev, entry)
-        self.debug("Added service '%s' to TGT '%s' with ST '%s'." % (service, tgt, st))
         defer.returnValue(st)
         
     @defer.inlineCallbacks
@@ -325,7 +348,6 @@ class CouchDBTicketStore(object):
         pgts = entry.setdefault('pgts', set([]))
         pgts.add(pgt)
         yield self._update_ticket(_id, _rev, entry)
-        self.debug("Added PGT '%s' to TGT '%s'." % (pgt, tgt))
         defer.returnValue(pgt)
 
     def mkLoginTicket(self, service):
@@ -503,7 +525,6 @@ class CouchDBTicketStore(object):
             Expire associated PGTs.
             Perform SLO.
             """
-            self.debug("Expired TGT '%s'." % ticket)
             #SLO
             services = data.get('services', {})
             self.reactor.callLater(0.0, self._notifyServicesSLO, services)
@@ -535,7 +556,6 @@ class CouchDBTicketStore(object):
         template = self._samlLogoutTemplate
         dlist = []
         for service, st in services.iteritems():
-            self.debug("Notifing service '%s' of SLO with ST '%s' ..." % (service, st))
             dt = datetime.datetime.today()
             issue_instant = dt.strftime("%Y-%m-%dT%H:%M:%S")
             identifier = str(uuid.uuid4())
