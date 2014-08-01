@@ -95,15 +95,16 @@ class CouchDBTicketStore(object):
         ticket = self._generate(prefix)
         data['ticket_id'] = ticket
         expires = datetime.datetime.today() + datetime.timedelta(seconds=timeout)
-        data['expires'] = expires.strftime('%Y-%m-%dT%H:%M:%S')
+        data[u'expires'] = expires.strftime('%Y-%m-%dT%H:%M:%S')
         if 'pgts' in data:
-            data['pgts'] = list(data['pgts'])
+            data[u'pgts'] = list(data['pgts'])
         
         url = '''%(scheme)s%(host)s:%(port)s/%(db)s''' % {
             'scheme': self._scheme,
             'host': self._couch_host,
             'port': self._couch_port,
             'db': self._couch_db}
+        url = url.encode('utf-8')
         doc = json.dumps(data)
         self.debug("_mkTicket(): url: %s" % url)
         self.debug("_mkTicket(): doc: %s" % doc)
@@ -129,39 +130,51 @@ class CouchDBTicketStore(object):
             'host': self._couch_host,
             'port': self._couch_port,
             'db': self._couch_db}
-        params = {'key': json.dumps(ticket)}
+        url = url.encode('utf-8')
+        params = {'key': json.dumps(ticket.encode('utf-8'))}
+        self.debug("_fetch_ticket(), url: %s" % url)
+        self.debug("_fetch_ticket(), params: %s" % str(params))
         response = yield treq.get(url, 
                     params=params, 
                     headers={'Accept': 'application/json'},
                     auth=(self._couch_user, self._couch_passwd))
         doc = yield treq.json_content(response)
         self.debug("_fetch_ticket(): doc:\n%s" % str(doc))
-        if doc['total_rows'] > 0:
-            entry = doc['rows'][0]
-            entry['expires'] = parse_date(entry['expires'])
-            if 'pgts' in entry:
-                entry['pgts'] = set(entry['pgts'])
-                defer.returnValue(entry)
+        rows = doc[u'rows']
+        if len(rows) > 0:
+            self.debug("_fetch_ticket(): rows found.")
+            entry = rows[0][u'value']
+            entry[u'expires'] = parse_date(entry[u'expires'])
+            if u'pgts' in entry:
+                entry[u'pgts'] = set(entry[u'pgts'])
+            self.debug("_fetch_ticket(): returning an entry...")
+            defer.returnValue(entry)
+        self.debug("_fetch_ticket(): no rows found.")
         defer.returnValue(None)
 
     @defer.inlineCallbacks
-    def _update_ticket(self, _id, entry):
+    def _update_ticket(self, _id, data):
         """
         Update a ticket in CouchDB.
         """
-        expires = datetime.datetime.today() + datetime.timedelta(seconds=timeout)
-        data['expires'] = data['expires'].strftime('%Y-%m-%dT%H:%M:%S')
-        if 'pgts' in data:
-            data['pgts'] = list(data['pgts'])
+        data[u'expires'] = data[u'expires'].strftime('%Y-%m-%dT%H:%M:%S')
+        if u'pgts' in data:
+            data[u'pgts'] = list(data[u'pgts'])
         url = '''%(scheme)s%(host)s:%(port)s/%(db)s/%(docid)s''' % {
             'scheme': self._scheme,
             'host': self._couch_host,
             'port': self._couch_port,
             'db': self._couch_db,
             'docid': _id}
-        doc = json.dumps(entry)
-        response = yield treq.put(url, data=doc, headers={
-            'Accept': 'application/json', 'Content-Type': 'application/json'})
+        url = url.encode('utf-8')
+        doc = json.dumps(data)
+        response = yield treq.put(
+                            url, 
+                            data=doc, 
+                            auth=(self._couch_user, self._couch_passwd),
+                            headers={
+                                'Accept': 'application/json', 
+                                'Content-Type': 'application/json'})
         doc = yield treq.json_content(response)
         defer.returnValue(None)
 
@@ -176,9 +189,17 @@ class CouchDBTicketStore(object):
             'port': self._couch_port,
             'db': self._couch_db,
             'docid': _id}
+        url = url.encode('utf-8')
         params = {'rev': _rev}
-        response = yield treq.delete(url, params=params, headers={'Accept': 'application/json'})
-        yield treq.content(response)
+        self.debug('_delete_ticket(), url: %s' % url)
+        self.debug('_delete_ticket(), params: %s' % str(params))
+        response = yield treq.delete(
+                            url,
+                            params=params, 
+                            auth=(self._couch_user, self._couch_passwd),
+                            headers={'Accept': 'application/json'})
+        resp_text = yield treq.content(response)
+        self.debug('_delete_ticket(), resp_text: %s' % resp_text)
         defer.returnValue(None)
 
     @defer.inlineCallbacks
@@ -191,8 +212,8 @@ class CouchDBTicketStore(object):
         if entry is not None:
             _id = entry['_id']
             _rev = entry['_rev']
-            del entry['_id']
-            del entry['_rev']
+            del entry[u'_id']
+            del entry[u'_rev']
             yield self._delete_ticket(_id, _rev)
             yield self._expire_callback(val, entry, False)
         self.debug("Expired ticket '%s'." % val)
@@ -206,35 +227,51 @@ class CouchDBTicketStore(object):
 
         @raise InvalidTicket: If the ticket doesn't exist or is no longer valid.
         """
-        
+        self.debug("_useTicket()") 
+        self.debug("_useTicket(), ticket '%s'" % ticket) 
         entry = yield self._fetch_ticket(ticket)
+        self.debug("_useTicket(), entry: %s" % str(entry))
         if entry is not None:
-            _id = entry['_id']
-            _rev = entry['_rev']
-            expires = entry['expires']
+            _id = entry[u'_id']
+            _rev = entry[u'_rev']
+            expires = entry[u'expires']
             now = datetime.datetime.today()
+            self.debug("_useTicket(): now: %s, exipres: %s" % (now, expires))
             if now >= expires:
+                self.debug("_useTicket(), ticket expired.") 
                 raise InvalidTicket("Ticket has expired.")
-            del entry['_id']
-            del entry['_rev']
+            self.debug("_useTicket(), deleting some attributes ...") 
+            del entry[u'_id']
+            del entry[u'_rev']
             if _consume:
+                self.debug("_useTicket(), consuming ...")
                 yield self._delete_ticket(_id, _rev)
                 yield self._expire_callback(ticket, entry, True)
             else:
-                if ticket.startswith('PT-'):
-                    timeout = self.lifespan
-                elif ticket.startwith('ST-'):
-                    timeout = self.lifespan
-                elif ticket.startswith('LT-'):
-                    timeout = self.lt_lifespan
-                elif ticket.startswith('PGT-'):
-                    timeout = self.pgt_lifespan
-                elif ticket.startswith('TGC-'):
-                    timeout = self.cookie_lifespan
-                else:
-                    timeout = 10
+                self.debug("_useTicket(), computing updated timeout ...") 
+                try:
+                    if ticket.startswith(u'PT-'):
+                        timeout = self.lifespan
+                    elif ticket.startswith(u'ST-'):
+                        timeout = self.lifespan
+                    elif ticket.startswith(u'LT-'):
+                        timeout = self.lt_lifespan
+                    elif ticket.startswith(u'PGT-'):
+                        timeout = self.pgt_lifespan
+                    elif ticket.startswith(u'TGC-'):
+                        timeout = self.cookie_lifespan
+                    else:
+                        timeout = 10
+                except Exception as ex:
+                    self.debug(str(ex))
+                self.debug("_useTicket(), timeout: %s" % timeout) 
+                self.debug("_useTicket(), getting now ...") 
                 now = datetime.datetime.today()
-                entry['expires'] = now + datetime.timedelta(timeout)
+                self.debug("_useTicket(), creating new expires attrib ...") 
+                expires = now + datetime.timedelta(seconds=timeout)
+                self.debug("_useTicket(), assigning new expires attrib ...") 
+                entry[u'expires'] = expires
+                self.debug("_useTicket(), getting ready to update ticket.") 
                 yield self._update_ticket(_id, entry)
             defer.returnValue(entry)
         else:
@@ -249,9 +286,9 @@ class CouchDBTicketStore(object):
         entry = yield self._fetch_ticket(tgt)
         if entry is None:
             raise InvalidTicket("Ticket '%s' does not exist." % tgt)
-        _id = entry['_id']
-        del entry['_id']
-        del entry['_rev']
+        _id = entry[u'_id']
+        del entry[u'_id']
+        del entry[u'_rev']
         services = entry.setdefault('services', {})
         services[service] = st
         yield self._update_ticket(_id, entry)
@@ -270,9 +307,9 @@ class CouchDBTicketStore(object):
         entry = yield self._fetch_ticket(tgt)
         if entry is None:
             raise InvalidTicket("Ticket '%s' does not exist." % tgt)
-        _id = entry['_id']
-        del entry['_id']
-        del entry['_rev']
+        _id = entry[u'_id']
+        del entry[u'_id']
+        del entry[u'_rev']
         pgts = entry.setdefault('pgts', set([]))
         pgts.add(pgt)
         yield self._update_ticket(_id, entry)
@@ -300,7 +337,7 @@ class CouchDBTicketStore(object):
         def doit(_):
             d = self._useTicket(ticket)
             def cb(data):
-                if data['service'] != service:
+                if data[u'service'] != service:
                     raise InvalidTicket()
             return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
@@ -315,8 +352,9 @@ class CouchDBTicketStore(object):
         entry = yield self._fetch_ticket(tgt_id)
         if entry is None:
             raise InvalidTicket("Invalid TGT '%s'." % tgt_id)
-        del entry['_id']
-        del entry['_rev']
+        del entry[u'_id']
+        del entry[u'_rev']
+        tgt = entry
         yield self._validService(service)
         ticket = yield self._mkTicket('ST-', {
                 'avatar_id': tgt['avatar_id'],
@@ -346,18 +384,18 @@ class CouchDBTicketStore(object):
             raise InvalidTicket("PGT '%s' is invalid." % pgt)
         pgturl = pgt_info['pgturl']
         try:
-            tgt = pgt_info['tgt']
+            tgt = pgt_info[u'tgt']
         except KeyError:
             raise InvalidTicket("PGT '%s' is invalid." % pgt)
         yield self._validService(service)
         pt = self._mkTicket('PT-', {
-                'avatar_id': pgt_info['avatar_id'],
+                'avatar_id': pgt_info[u'avatar_id'],
                 'service': service,
                 'primary_credentials': False,
                 'pgturl': pgturl,
                 'pgt': pgt,
                 'tgt': tgt,
-                'proxy_chain': pgt_info['proxy_chain'],
+                'proxy_chain': pgt_info[u'proxy_chain'],
             })
         yield self._informTGTOfService(pt, service, tgt)
         defer.returnValue(pt)
@@ -379,7 +417,7 @@ class CouchDBTicketStore(object):
         def doit(_):
             d = self._useTicket(ticket)
             def cb(data):
-                if data['service'] != service:
+                if data[u'service'] != service:
                     raise InvalidTicket()
                 if requirePrimaryCredentials and data['primary_credentials'] == False:
                     raise InvalidTicket("This ticket was not issued in response to primary credentials.")
@@ -394,12 +432,12 @@ class CouchDBTicketStore(object):
         """
         if not (ticket.startswith("ST-") or ticket.startswith("PT-")):
             raise InvalidTicket()
-        tgt_info = self._fetch_ticket(tgt)
+        tgt_info = yield self._fetch_ticket(tgt)
         if tgt_info is None:
             raise InvalidTicket("TGT '%s' is invalid." % tgt)
-        del tgt_info['_id']
-        del tgt_info['_rev']
-        yield self._validateService(service)
+        del tgt_info[u'_id']
+        del tgt_info[u'_rev']
+        yield self._validService(service)
         charset = self.charset
         iou = 'PGTIOU-' + (''.join([random.choice(charset) for n in range(256)]))
         data = {
@@ -415,7 +453,7 @@ class CouchDBTicketStore(object):
             new_proxy_chain.append(pgturl)
         else:
             new_proxy_chain = [pgturl]
-        data['proxy_chain'] = new_proxy_chain 
+        data[u'proxy_chain'] = new_proxy_chain 
     
         pgt = yield self._mkTicket('PGT-', data, _timeout=self.pgt_lifespan)
         yield self._informTGTOfPGT(pgt, tgt)
@@ -458,7 +496,7 @@ class CouchDBTicketStore(object):
             services = data.get('services', {})
             self.reactor.callLater(0.0, self._notifyServicesSLO, services)
             #PGTs
-            pgts = data.get('pgts', {})
+            pgts = data.get(u'pgts', {})
             for pgt in pgts:
                 self._expireTicket(pgt)
             return None
