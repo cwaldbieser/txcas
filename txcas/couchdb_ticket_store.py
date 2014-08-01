@@ -11,6 +11,7 @@ from xml.sax.saxutils import escape as xml_escape
 # Application modules
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         NotSSOService
+import txcas.http
 from txcas.interface import ITicketStore
 from txcas.utils import http_status_filter
 
@@ -45,7 +46,7 @@ class CouchDBTicketStore(object):
     def __init__(self, couch_host, couch_port, couch_db,
                 couch_user, couch_passwd, use_https=True,
                 reactor=reactor, valid_service=None, 
-                is_sso_service=None, _debug=False):
+                is_sso_service=None, _debug=False, verify_cert=True):
         self.reactor = reactor
         self.valid_service = valid_service or (lambda x:True)
         self.is_sso_service = is_sso_service or (lambda x: True)
@@ -57,6 +58,11 @@ class CouchDBTicketStore(object):
         self._couch_db = couch_db
         self._couch_user = couch_user
         self._couch_passwd = couch_passwd
+        if verify_cert:
+            self.reqlib = treq
+        else:
+            self.reqlib = txcas.http
+
         if use_https:
             self._scheme = 'https://'
         else:
@@ -117,13 +123,14 @@ class CouchDBTicketStore(object):
         
         def return_ticket(result, ticket, data):
             return ticket
-            
-        d = treq.post(url, data=doc, auth=(self._couch_user, self._couch_passwd),
+           
+        reqlib = self.reqlib 
+        d = reqlib.post(url, data=doc, auth=(self._couch_user, self._couch_passwd),
                         headers=Headers({
                             'Accept': ['application/json'], 
                             'Content-Type': ['application/json']}))
         d.addCallback(http_status_filter, [(201,201)], CouchDBError)
-        d.addCallback(treq.content)
+        d.addCallback(reqlib.content)
         d.addCallback(return_ticket, ticket, data)
         
         return d
@@ -144,12 +151,13 @@ class CouchDBTicketStore(object):
         self.debug("[DEBUG][CouchDB] _fetch_ticket(), url: %s" % url)
         self.debug("[DEBUG][CouchDB] _fetch_ticket(), params: %s" % str(params))
 
-        response = yield treq.get(url, 
+        reqlib = self.reqlib
+        response = yield reqlib.get(url, 
                     params=params, 
                     headers=Headers({'Accept': ['application/json']}),
                     auth=(self._couch_user, self._couch_passwd))
         response = yield http_status_filter(response, [(200,200)], CouchDBError)
-        doc = yield treq.json_content(response)
+        doc = yield reqlib.json_content(response)
         rows = doc[u'rows']
         if len(rows) > 0:
             entry = rows[0][u'value']
@@ -187,7 +195,8 @@ class CouchDBTicketStore(object):
             self.debug("[DEBUG][CouchDB] Failed to serialze doc:\n%s" % (str(data)))
             raise
 
-        response = yield treq.put(
+        reqlib = self.reqlib
+        response = yield reqlib.put(
                             url, 
                             params=params,
                             data=doc, 
@@ -196,7 +205,7 @@ class CouchDBTicketStore(object):
                                 'Accept': ['application/json'], 
                                 'Content-Type': ['application/json']}))
         response = yield http_status_filter(response, [(201,201)], CouchDBError)
-        doc = yield treq.json_content(response)
+        doc = yield reqlib.json_content(response)
         defer.returnValue(None)
 
     @defer.inlineCallbacks
@@ -216,13 +225,14 @@ class CouchDBTicketStore(object):
         self.debug('[DEBUG][CouchDB] _delete_ticket(), url: %s' % url)
         self.debug('[DEBUG][CouchDB] _delete_ticket(), params: %s' % str(params))
 
-        response = yield treq.delete(
+        reqlib = self.reqlib
+        response = yield reqlib.delete(
                             url,
                             params=params, 
                             auth=(self._couch_user, self._couch_passwd),
                             headers=Headers({'Accept': ['application/json']}))
         response = yield http_status_filter(response, [(200,200)], CouchDBError)
-        resp_text = yield treq.content(response)
+        resp_text = yield reqlib.content(response)
         defer.returnValue(None)
 
     @defer.inlineCallbacks
@@ -536,7 +546,8 @@ class CouchDBTicketStore(object):
                 'issue_instant': xml_escape(issue_instant),
                 'service_ticket': xml_escape(st)
             }
-            d = treq.post(service, data=data, _timeout=30).addCallback(treq.content)
+            reqlib = self.reqlib
+            d = reqlib.post(service, data=data, _timeout=30).addCallback(reqlib.content)
             dlist.append(d)
         return defer.DeferredList(dlist, consumeErrors=True)
 

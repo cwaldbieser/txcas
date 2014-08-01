@@ -12,12 +12,16 @@ if txcas.settings.has_options(_scp, {'CouchDB': ['host', 'port', 'db', 'user', '
     use_https = True
     if _scp.has_option('CouchDB', 'https'):
         use_https = bool(_scp.getint('CouchDB', 'https'))
+    verify_cert = True
+    if _scp.has_option('CouchDB', 'verify_cert'):
+        verify_cert = bool(_scp.getint('CouchDB', 'verify_cert'))
     couchdb_ticket_store = CouchDBTicketStore(
                             couch_host=_scp.get('CouchDB', 'host'), 
                             couch_port=_scp.getint('CouchDB', 'port'), 
                             couch_db=_scp.get('CouchDB', 'db'),
                             couch_user=_scp.get('CouchDB', 'user'), 
                             couch_passwd=_scp.get('CouchDB', 'passwd'),
-                            use_https=use_https)
+                            use_https=use_https,
+                            verify_cert=verify_cert)
 
 
