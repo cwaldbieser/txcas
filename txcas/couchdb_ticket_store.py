@@ -153,7 +153,7 @@ class CouchDBTicketStore(object):
         defer.returnValue(None)
 
     @defer.inlineCallbacks
-    def _update_ticket(self, _id, data):
+    def _update_ticket(self, _id, _rev, data):
         """
         Update a ticket in CouchDB.
         """
@@ -167,15 +167,25 @@ class CouchDBTicketStore(object):
             'db': self._couch_db,
             'docid': _id}
         url = url.encode('utf-8')
-        doc = json.dumps(data)
+        params = {
+            'rev': _rev.encode('utf-8')
+        }
+        self.debug("_update_ticket(), url: %s" % url)
+        try:
+            doc = json.dumps(data)
+        except Exception as ex:
+            self.debug("Failed to serialze doc:\n%s" % (str(data)))
+            raise
         response = yield treq.put(
                             url, 
+                            params=params,
                             data=doc, 
                             auth=(self._couch_user, self._couch_passwd),
                             headers={
                                 'Accept': 'application/json', 
                                 'Content-Type': 'application/json'})
         doc = yield treq.json_content(response)
+        self.debug("_update_ticket(), response:\n%s" % str(doc))
         defer.returnValue(None)
 
     @defer.inlineCallbacks
@@ -272,7 +282,7 @@ class CouchDBTicketStore(object):
                 self.debug("_useTicket(), assigning new expires attrib ...") 
                 entry[u'expires'] = expires
                 self.debug("_useTicket(), getting ready to update ticket.") 
-                yield self._update_ticket(_id, entry)
+                yield self._update_ticket(_id, _rev, entry)
             defer.returnValue(entry)
         else:
             raise InvalidTicket("Ticket '%s' does not exist." % ticket)
@@ -287,11 +297,12 @@ class CouchDBTicketStore(object):
         if entry is None:
             raise InvalidTicket("Ticket '%s' does not exist." % tgt)
         _id = entry[u'_id']
+        _rev = entry[u'_rev']
         del entry[u'_id']
         del entry[u'_rev']
         services = entry.setdefault('services', {})
         services[service] = st
-        yield self._update_ticket(_id, entry)
+        yield self._update_ticket(_id, _rev, entry)
         self.debug("Added service '%s' to TGT '%s' with ST '%s'." % (service, tgt, st))
         defer.returnValue(st)
         
@@ -308,11 +319,12 @@ class CouchDBTicketStore(object):
         if entry is None:
             raise InvalidTicket("Ticket '%s' does not exist." % tgt)
         _id = entry[u'_id']
+        _rev = entry[u'_rev']
         del entry[u'_id']
         del entry[u'_rev']
         pgts = entry.setdefault('pgts', set([]))
         pgts.add(pgt)
-        yield self._update_ticket(_id, entry)
+        yield self._update_ticket(_id, _rev, entry)
         self.debug("Added PGT '%s' to TGT '%s'." % (pgt, tgt))
         defer.returnValue(pgt)
 
@@ -388,7 +400,7 @@ class CouchDBTicketStore(object):
         except KeyError:
             raise InvalidTicket("PGT '%s' is invalid." % pgt)
         yield self._validService(service)
-        pt = self._mkTicket('PT-', {
+        pt = yield self._mkTicket('PT-', {
                 'avatar_id': pgt_info[u'avatar_id'],
                 'service': service,
                 'primary_credentials': False,
