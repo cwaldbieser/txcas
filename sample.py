@@ -80,6 +80,7 @@ class MyApp(object):
         if self.act_as_proxy is not None:
             parts = ["""<li><a href="/pgtinfo">Click here to see your current PGT.</a>.</li>"""]
             parts.append("""<li><a href="/proxy-a-service">This service will proxy another service.</a>.</li>""")
+            parts.append("""<li><a href="/proxy-a-service-mismatch">This service will proxy another, but the PT will be requested (erroneously) with a different URL than the service for which it is presented.</a>.</li>""")
             parts.append("""<li><a href="/badproxyticket">Make a bad request for a proxy ticket.</a>.</li>""")
             pgt_markup = '\n'.join(parts)
         else:
@@ -199,7 +200,14 @@ class MyApp(object):
             return "No PGT"
 
     @app.route('/proxy-a-service', methods=['GET'])
-    def getproxyticket_GET(self, request):
+    def proxy_a_service_GET(self, request):
+        return self._proxy_a_service(request)
+
+    @app.route('/proxy-a-service-mismatch', methods=['GET'])
+    def proxy_a_service_mismatch_GET(self, request):
+        return self._proxy_a_service(request, service_mismatch="http://fail.example.com/")
+
+    def _proxy_a_service(self, request, service_mismatch=None):
         act_as_proxy = self.act_as_proxy
         proxied_service = act_as_proxy['service']
         request_service_endpoint = act_as_proxy['request_service_endpoint']
@@ -237,7 +245,6 @@ class MyApp(object):
             def requestService(pt, proxied_service, request_service_endpoint):
                 q = {
                     'ticket': pt,
-                    'service': proxied_service
                 }
                 url = request_service_endpoint + '?' + urlencode(q)
                 d = getPage(url)
@@ -290,13 +297,16 @@ class MyApp(object):
 
             url = self.cas_root + '/proxy'
             q = {
-                'targetService': proxied_service,
+                'targetService': service_mismatch or proxied_service,
                 'pgt': session.pgt,
             }
             url += '?' + urlencode(q)
             d = getPage(url)
             d.addCallback(parsePT)
-            d.addCallback(requestService, proxied_service, request_service_endpoint)
+            d.addCallback(
+                    requestService, 
+                    proxied_service, 
+                    request_service_endpoint) 
             d.addCallback(printResult) 
             d.addErrback(printError)
             return d
