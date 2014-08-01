@@ -20,6 +20,7 @@ import treq
 from twisted.internet import defer, reactor
 from twisted.plugin import IPlugin
 from twisted.python import log
+from twisted.web.http_headers import Headers
 from zope.interface import implements
 
 
@@ -118,7 +119,9 @@ class CouchDBTicketStore(object):
             return ticket
             
         d = treq.post(url, data=doc, auth=(self._couch_user, self._couch_passwd),
-                        headers={'Accept': 'application/json', 'Content-Type': 'application/json'})
+                        headers=Headers({
+                            'Accept': ['application/json'], 
+                            'Content-Type': ['application/json']}))
         d.addCallback(http_status_filter, [(201,201)], CouchDBError)
         d.addCallback(treq.content)
         d.addCallback(return_ticket, ticket, data)
@@ -143,7 +146,7 @@ class CouchDBTicketStore(object):
 
         response = yield treq.get(url, 
                     params=params, 
-                    headers={'Accept': 'application/json'},
+                    headers=Headers({'Accept': ['application/json']}),
                     auth=(self._couch_user, self._couch_passwd))
         response = yield http_status_filter(response, [(200,200)], CouchDBError)
         doc = yield treq.json_content(response)
@@ -189,9 +192,9 @@ class CouchDBTicketStore(object):
                             params=params,
                             data=doc, 
                             auth=(self._couch_user, self._couch_passwd),
-                            headers={
-                                'Accept': 'application/json', 
-                                'Content-Type': 'application/json'})
+                            headers=Headers({
+                                'Accept': ['application/json'], 
+                                'Content-Type': ['application/json']}))
         response = yield http_status_filter(response, [(201,201)], CouchDBError)
         doc = yield treq.json_content(response)
         defer.returnValue(None)
@@ -217,7 +220,7 @@ class CouchDBTicketStore(object):
                             url,
                             params=params, 
                             auth=(self._couch_user, self._couch_passwd),
-                            headers={'Accept': 'application/json'})
+                            headers=Headers({'Accept': ['application/json']}))
         response = yield http_status_filter(response, [(200,200)], CouchDBError)
         resp_text = yield treq.content(response)
         defer.returnValue(None)
