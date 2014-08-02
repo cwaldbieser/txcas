@@ -51,7 +51,6 @@ class CouchDBTicketStore(object):
         self.valid_service = valid_service or (lambda x:True)
         self.is_sso_service = is_sso_service or (lambda x: True)
         self._debug = _debug
-        self._debug = True
         self._expire_callback = (lambda ticket, data, explicit: None)
         self._couch_host = couch_host
         self._couch_port = couch_port
