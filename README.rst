@@ -46,3 +46,24 @@ These are configured in :file:`cas.cfg`.  Some plugins require additional
 dependencies.  E.g. the LDAP-based plugins require ldaptor 
 (https://github.com/twisted/ldaptor).
 
+Configuration
+-------------
+The configuration file is called 'cas.cfg' or '.casrc' if located in your
+$HOME on UNIX-like systems.  The meanings of the sections are as follows:
+
+- PLUGINS: Defines what components to use.
+    - cred_checker: Component to use for checking credentials.
+      Various checkers include:
+        - DemoChecker (default): Simple in-memory checker that responds
+          positively only to user 'foo' and password 'password'.
+        - LDAPSimpleBindChecker: Attempts simple BIND to LDAP to check
+          check account credentials.
+    - realm: User realm used to return a CAS user
+        - DemoRealm (default): Creates a user based on the username and
+          makes up some attributes for demonstration purposes.
+        - LDAPRealm: Creates a user with attributes read from an LDAP
+          account.
+    - ticket_store: Storage for CAS tickets.
+        - InMemoryTicketStore: Stores tickets in memory.
+        - CouchDBTicketStore: Stores tickets in CouchDB.
+
