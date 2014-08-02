@@ -1,7 +1,8 @@
 
 [PLUGINS]
-cred_checker = DemoChecker
-realm = DemoRealm
+cred_checker = LDAPSimpleBindChecker
+realm = LDAPRealm
+ticket_store = CouchDBTicketStore
 
 [LDAP]
 host = 127.0.0.1
@@ -9,4 +10,13 @@ port = 389
 basedn = dc=example,dc=org
 binddn = cn=admin,dc=example,dc=org
 bindpw = secret
+
+[CouchDB]
+host = 127.0.0.1
+port = 6984
+db = cas_tickets
+user = castsuser
+passwd = secret
+https = 1
+verify_cert = 0
 

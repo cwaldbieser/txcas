@@ -10,9 +10,10 @@ import urlparse
 # External modules
 from treq import content, text_content, json_content
 
-from twisted.web.client import Agent, FileBodyProducer, readBody
 from twisted.internet import reactor
 from twisted.internet.ssl import ClientContextFactory
+from twisted.web.client import Agent, FileBodyProducer, readBody
+from twisted.web.http_headers import Headers
 
 class WebClientContextFactory(ClientContextFactory):
     """
