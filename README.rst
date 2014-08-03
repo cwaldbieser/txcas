@@ -24,6 +24,8 @@ Run the :program:`sample.py` script as follows::
 The CAS server will run on port 9800.
 Service 1 runs on port 9801.
 Service 2 runs on port 9802.
+Service 3 runs on port 9803.
+Service 4 runs on port 9804.
 All services listen on localhost (127.0.0.1).
 
 Point a browser to service 1 at http://127.0.0.1:9801/ .  You
@@ -32,12 +34,17 @@ will be redirected to the CAS server to log in.  Use 'foo' and
 to the service.  You will see you are now logged in as 'foo'.
 
 The log being printed to the console will have printed out the
-/serviceValidate XML response, including so (ficticious) attributes
-that were added to the avatar by the UserRealm.
+/proxyValidate XML response, including so (ficticious) attributes
+that were added to the avatar by the DemoUserRealm.
 
 If you point your browser to service 2, your SSO session (provided by
 the CAS ticket granting cookie (TGC) will have transparently allowed
 you to log into the second service without having to re-enter crdentials.
+
+Service 2 will also allow you to proxy service 1, which will in turn
+proxy service 4.  The result returned will show the complete proxy chain.
+
+Service 3 requires you to use primary credentials to log in.
 
 Plugins
 -------
@@ -65,5 +72,33 @@ $HOME on UNIX-like systems.  The meanings of the sections are as follows:
           account.
     - ticket_store: Storage for CAS tickets.
         - InMemoryTicketStore: Stores tickets in memory.
-        - CouchDBTicketStore: Stores tickets in CouchDB.
+        - CouchDBTicketStore: Stores tickets in CouchDB
+
+LDAP Configuration
+==================
+The LDAPSimpleBindChecker and LDAPUSerRealm plugins require a configuration
+section called "LDAP" that supports the following options:
+- host
+- port
+- basedn
+- binddn
+- bindpw
+
+CouchDB Configuration
+=====================
+The CouchDBTicketStore plugin requires a configuration section called
+"CouchDB" with the following options:
+- host
+- port
+- db
+- user
+- passwd
+- https: 1 (use https) or 0 (use http)
+- verify_cert: 1 (verify peer during proxy callback as per CAS protocol) or
+  0 (do not verify peer-- useful when using self-signed cert during development
+  and testing).
+
+The CouchDB database itself will need to be configured with the appropriate views.
+You can set up the database views by running the :program:`setup_couchdb.py` program.
+
 
