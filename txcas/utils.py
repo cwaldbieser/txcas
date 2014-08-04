@@ -1,4 +1,6 @@
 
+# External modules.
+import treq
 
 def http_status_filter(response, allowed, ex, msg=None, include_resp_text=True):
     """
@@ -34,3 +36,21 @@ def http_status_filter(response, allowed, ex, msg=None, include_resp_text=True):
         return d
     return response
 
+def unwrap_failures(err):
+    """
+    Takes nested failures and flattens the nodes into a list.
+    The branches are discarded.
+    """
+    errs = []
+    check_unwrap = [err]
+    while len(check_unwrap) > 0:
+        err = check_unwrap.pop()
+        if hasattr(err.value, 'reasons'):
+            errs.extend(err.value.reasons)
+            check_unwrap.extend(err.value.reasons)
+        else:
+            errs.append(err)
+    return errs
+    
+        
+        

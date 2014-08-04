@@ -438,7 +438,9 @@ class CouchDBTicketStore(object):
                     raise InvalidTicket("This ticket was not issued in response to primary credentials.")
                 return data
             return d.addCallback(cb)
-        return self._validService(service).addCallback(doit)
+            
+        return self._validService(service).addCallback(
+            doit)
 
     @defer.inlineCallbacks
     def mkProxyGrantingTicket(self, service, ticket, tgt, pgturl, proxy_chain=None):
@@ -547,7 +549,16 @@ class CouchDBTicketStore(object):
                 'service_ticket': xml_escape(st)
             }
             reqlib = self.reqlib
-            d = reqlib.post(service.encode('utf-8'), data=data, timeout=30).addCallback(reqlib.content)
+            def logerr(err, service):
+                log.msg("Error sending SLO to service '%s'." % service)
+                log.err(err)
+                errs = txcas.utils.unwrap_failures(err)
+                for error in errs:
+                    log.err(error)
+                return err
+            d = reqlib.post(service.encode('utf-8'), data=data.encode('utf-8'), timeout=30).addCallback(
+                reqlib.content).addErrback(
+                logerr, service)
             dlist.append(d)
         return defer.DeferredList(dlist, consumeErrors=True)
 
