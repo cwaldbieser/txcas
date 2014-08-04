@@ -1,9 +1,10 @@
 
 [CAS]
-port = 9800
-https = 1
-key_pem = ssl/serverkey.pem
-cert_pem = ssl/servercert.pem
+lt_lifespan = 300
+st_lifespan = 10
+pt_lifespan = 10
+pgt_lifespan = 600
+tgt_lifespan = 86400
 validate_pgturl = 0
 
 [PLUGINS]

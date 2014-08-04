@@ -1,11 +1,10 @@
 
 
-RUN_CAS_SERVER=True
-
 #Standard library
 import cgi
 from textwrap import dedent
 from urllib import urlencode
+import sys
 
 #Application modules
 from txcas.interface import ITicketStore
@@ -443,80 +442,87 @@ class MyApp(object):
 
         return d
 
-if RUN_CAS_SERVER:
-    # server
-    from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
-    from twisted.cred.checkers import ICredentialsChecker
-    from txcas.server import ServerApp
+if __name__ == "__main__":
+    argv = sys.argv[1:]
+    if len(argv) > 0 and argv[0] == "nocas":
+        run_cas_server = False
+    else:
+        run_cas_server = True
+    
+    if run_cas_server:
+        # server
+        from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
+        from twisted.cred.checkers import ICredentialsChecker
+        from txcas.server import ServerApp
 
-    page_views = {'login': custom_login}
-    #page_views = None
+        page_views = {'login': custom_login}
+        #page_views = None
 
-    # Load the config.
-    scp = txcas.settings.load_settings('cas', syspath='/etc/cas', defaults={
-            'PLUGINS': {
-                'cred_checker': 'DemoChecker',
-                'realm': 'DemoRealm',
-                'ticket_store': 'InMemoryTicketStore'}})
+        # Load the config.
+        scp = txcas.settings.load_settings('cas', syspath='/etc/cas', defaults={
+                'PLUGINS': {
+                    'cred_checker': 'DemoChecker',
+                    'realm': 'DemoRealm',
+                    'ticket_store': 'InMemoryTicketStore'}})
 
-    # Choose plugin that implements ITicketStore.
-    ticket_store = txcas.settings.get_plugin(
-            scp.get('PLUGINS', 'ticket_store'), ITicketStore)
-    assert ticket_store is not None, "Ticket Store has not been configured!"
+        # Choose plugin that implements ITicketStore.
+        ticket_store = txcas.settings.get_plugin(
+                scp.get('PLUGINS', 'ticket_store'), ITicketStore)
+        assert ticket_store is not None, "Ticket Store has not been configured!"
 
-        
-    # Choose the plugin that implements ICredentialsChecker.
-    checker = txcas.settings.get_plugin(
-            scp.get('PLUGINS', 'cred_checker'), ICredentialsChecker)
-    if checker is None:
-        checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
+            
+        # Choose the plugin that implements ICredentialsChecker.
+        checker = txcas.settings.get_plugin(
+                scp.get('PLUGINS', 'cred_checker'), ICredentialsChecker)
+        if checker is None:
+            checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
 
-    # Choose the plugin that implements IRealm.
-    realm = txcas.settings.get_plugin(
-            scp.get('PLUGINS', 'realm'), IRealm)
-    assert realm is not None, "User Realm has not been configured!"
+        # Choose the plugin that implements IRealm.
+        realm = txcas.settings.get_plugin(
+                scp.get('PLUGINS', 'realm'), IRealm)
+        assert realm is not None, "User Realm has not been configured!"
 
-    #Create the CAS server app.
-    server_app = ServerApp(ticket_store, realm, [checker], lambda x:True,
-                           requireSSL=False, page_views=page_views, validate_pgturl=False)
-
-
-# combines server/app
-from twisted.web.resource import Resource
-from twisted.web.server import Site
-from twisted.internet import reactor
-from twisted.python import log
-import sys
-log.startLogging(sys.stdout)
-
-if RUN_CAS_SERVER:
-    # cas server
-    reactor.listenTCP(9800, Site(server_app.app.resource()))
-
-# app 1
-app1 = MyApp(
-    '#acf', 'http://127.0.0.1:9800',
-    act_as_link_in_proxy_chain={
-        'request_service_endpoint': 'http://127.0.0.1:9804/acceptproxyticket',
-        'service': 'http://127.0.0.1:9804/landing',})
-reactor.listenTCP(9801, Site(app1.app.resource()))
-
-# app 2
-app2 = MyApp(
-    '#cfc', 'http://127.0.0.1:9800',
-    act_as_proxy={
-        'request_service_endpoint': 'http://127.0.0.1:9801/acceptproxyticket',
-        'service': 'http://127.0.0.1:9801/landing'})
-reactor.listenTCP(9802, Site(app2.app.resource()))
-
-# app 3
-app3 = MyApp('#abc', 'http://127.0.0.1:9800', allow_sso=False)
-reactor.listenTCP(9803, Site(app3.app.resource()))
-
-# app 4
-app4 = MyApp('#9932CC', 'http://127.0.0.1:9800')
-reactor.listenTCP(9804, Site(app4.app.resource()))
+        #Create the CAS server app.
+        server_app = ServerApp(ticket_store, realm, [checker], lambda x:True,
+                               requireSSL=False, page_views=page_views, validate_pgturl=False)
 
 
-reactor.run()
+    # combines server/app
+    from twisted.web.resource import Resource
+    from twisted.web.server import Site
+    from twisted.internet import reactor
+    from twisted.python import log
+    import sys
+    log.startLogging(sys.stdout)
+
+    if run_cas_server:
+        # cas server
+        reactor.listenTCP(9800, Site(server_app.app.resource()))
+
+    # app 1
+    app1 = MyApp(
+        '#acf', 'http://127.0.0.1:9800',
+        act_as_link_in_proxy_chain={
+            'request_service_endpoint': 'http://127.0.0.1:9804/acceptproxyticket',
+            'service': 'http://127.0.0.1:9804/landing',})
+    reactor.listenTCP(9801, Site(app1.app.resource()))
+
+    # app 2
+    app2 = MyApp(
+        '#cfc', 'http://127.0.0.1:9800',
+        act_as_proxy={
+            'request_service_endpoint': 'http://127.0.0.1:9801/acceptproxyticket',
+            'service': 'http://127.0.0.1:9801/landing'})
+    reactor.listenTCP(9802, Site(app2.app.resource()))
+
+    # app 3
+    app3 = MyApp('#abc', 'http://127.0.0.1:9800', allow_sso=False)
+    reactor.listenTCP(9803, Site(app3.app.resource()))
+
+    # app 4
+    app4 = MyApp('#9932CC', 'http://127.0.0.1:9800')
+    reactor.listenTCP(9804, Site(app4.app.resource()))
+
+
+    reactor.run()
 
