@@ -1,6 +1,6 @@
 
 
-SERVER_PATH='cas'
+RUN_CAS_SERVER=True
 
 #Standard library
 import cgi
@@ -443,41 +443,42 @@ class MyApp(object):
 
         return d
 
-# server
-from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
-from twisted.cred.checkers import ICredentialsChecker
-from txcas.server import ServerApp
+if RUN_CAS_SERVER:
+    # server
+    from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
+    from twisted.cred.checkers import ICredentialsChecker
+    from txcas.server import ServerApp
 
-page_views = {'login': custom_login}
-#page_views = None
+    page_views = {'login': custom_login}
+    #page_views = None
 
-# Load the config.
-scp = txcas.settings.load_settings('cas', syspath='/etc/cas', defaults={
-        'PLUGINS': {
-            'cred_checker': 'DemoChecker',
-            'realm': 'DemoRealm',
-            'ticket_store': 'InMemoryTicketStore'}})
+    # Load the config.
+    scp = txcas.settings.load_settings('cas', syspath='/etc/cas', defaults={
+            'PLUGINS': {
+                'cred_checker': 'DemoChecker',
+                'realm': 'DemoRealm',
+                'ticket_store': 'InMemoryTicketStore'}})
 
-# Choose plugin that implements ITicketStore.
-ticket_store = txcas.settings.get_plugin(
-        scp.get('PLUGINS', 'ticket_store'), ITicketStore)
-assert ticket_store is not None, "Ticket Store has not been configured!"
+    # Choose plugin that implements ITicketStore.
+    ticket_store = txcas.settings.get_plugin(
+            scp.get('PLUGINS', 'ticket_store'), ITicketStore)
+    assert ticket_store is not None, "Ticket Store has not been configured!"
 
-    
-# Choose the plugin that implements ICredentialsChecker.
-checker = txcas.settings.get_plugin(
-        scp.get('PLUGINS', 'cred_checker'), ICredentialsChecker)
-if checker is None:
-    checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
+        
+    # Choose the plugin that implements ICredentialsChecker.
+    checker = txcas.settings.get_plugin(
+            scp.get('PLUGINS', 'cred_checker'), ICredentialsChecker)
+    if checker is None:
+        checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
 
-# Choose the plugin that implements IRealm.
-realm = txcas.settings.get_plugin(
-        scp.get('PLUGINS', 'realm'), IRealm)
-assert realm is not None, "User Realm has not been configured!"
+    # Choose the plugin that implements IRealm.
+    realm = txcas.settings.get_plugin(
+            scp.get('PLUGINS', 'realm'), IRealm)
+    assert realm is not None, "User Realm has not been configured!"
 
-#Create the CAS server app.
-server_app = ServerApp(ticket_store, realm, [checker], lambda x:True,
-                       requireSSL=False, page_views=page_views, validate_pgturl=False)
+    #Create the CAS server app.
+    server_app = ServerApp(ticket_store, realm, [checker], lambda x:True,
+                           requireSSL=False, page_views=page_views, validate_pgturl=False)
 
 
 # combines server/app
@@ -488,8 +489,9 @@ from twisted.python import log
 import sys
 log.startLogging(sys.stdout)
 
-# cas server
-reactor.listenTCP(9800, Site(server_app.app.resource()))
+if RUN_CAS_SERVER:
+    # cas server
+    reactor.listenTCP(9800, Site(server_app.app.resource()))
 
 # app 1
 app1 = MyApp(

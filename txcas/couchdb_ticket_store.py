@@ -35,10 +35,11 @@ class CouchDBTicketStore(object):
     """
     implements(IPlugin, ITicketStore)
 
-    lifespan = 10
-    cookie_lifespan = 60 * 60 * 24 * 2
-    pgt_lifespan = 60 * 60 * 2
     lt_lifespan = 60*5
+    st_lifespan = 10
+    pt_lifespan = 10
+    tgt_lifespan = 60 * 60 * 24 * 2
+    pgt_lifespan = 60 * 60 * 2
     charset = string.ascii_letters + string.digits + '-'
     poll_expired = 60 * 5
 
@@ -91,7 +92,7 @@ class CouchDBTicketStore(object):
         return r
 
 
-    def _mkTicket(self, prefix, data, _timeout=None):
+    def _mkTicket(self, prefix, data, timeout):
         """
         Create a ticket prefixed with C{prefix}
 
@@ -101,7 +102,6 @@ class CouchDBTicketStore(object):
         @param data: Data associated with this ticket (which will be returned
             when L{_useTicket} is called).
         """
-        timeout = _timeout or self.lifespan
         ticket = self._generate(prefix)
         data['ticket_id'] = ticket
         expires = datetime.datetime.today() + datetime.timedelta(seconds=timeout)
@@ -120,7 +120,8 @@ class CouchDBTicketStore(object):
         self.debug("[DEBUG][CouchDB] _mkTicket(): url: %s" % url)
         self.debug("[DEBUG][CouchDB] _mkTicket(): doc: %s" % doc)
         
-        def return_ticket(result, ticket, data):
+        def return_ticket(result, ticket):
+            self.debug("[DEBUG][CouchDB] _mkTicket(), ticket: %s" % ticket)
             return ticket
            
         reqlib = self.reqlib 
@@ -130,7 +131,7 @@ class CouchDBTicketStore(object):
                             'Content-Type': ['application/json']}))
         d.addCallback(http_status_filter, [(201,201)], CouchDBError)
         d.addCallback(reqlib.content)
-        d.addCallback(return_ticket, ticket, data)
+        d.addCallback(return_ticket, ticket)
         
         return d
 
@@ -281,7 +282,7 @@ class CouchDBTicketStore(object):
                 elif ticket.startswith(u'PGT-'):
                     timeout = self.pgt_lifespan
                 elif ticket.startswith(u'TGC-'):
-                    timeout = self.cookie_lifespan
+                    timeout = self.tgt_lifespan
                 else:
                     timeout = 10
                 now = datetime.datetime.today()
@@ -338,7 +339,7 @@ class CouchDBTicketStore(object):
         def cb(_):
             return self._mkTicket('LT-', {
                 'service': service,
-            }, _timeout=self.lt_lifespan)
+            }, timeout=self.lt_lifespan)
         return d.addCallback(cb)
 
 
@@ -375,7 +376,7 @@ class CouchDBTicketStore(object):
                 'service': service,
                 'primary_credentials': primaryCredentials,
                 'tgt': tgt_id,
-            })
+            }, self.st_lifespan)
         yield self._informTGTOfService(ticket, service, tgt_id)
         defer.returnValue(ticket)  
 
@@ -410,7 +411,7 @@ class CouchDBTicketStore(object):
                 'pgt': pgt,
                 'tgt': tgt,
                 'proxy_chain': pgt_info[u'proxy_chain'],
-            })
+            }, self.pt_lifespan)
         yield self._informTGTOfService(pt, service, tgt)
         defer.returnValue(pt)
 
@@ -469,7 +470,7 @@ class CouchDBTicketStore(object):
             new_proxy_chain = [pgturl]
         data[u'proxy_chain'] = new_proxy_chain 
     
-        pgt = yield self._mkTicket('PGT-', data, _timeout=self.pgt_lifespan)
+        pgt = yield self._mkTicket('PGT-', data, timeout=self.pgt_lifespan)
         yield self._informTGTOfPGT(pgt, tgt)
         defer.returnValue({'iou': iou, 'pgt': pgt})
 
@@ -477,7 +478,7 @@ class CouchDBTicketStore(object):
         """
         Create a ticket to be used in a cookie.
         """
-        return self._mkTicket('TGC-', {'avatar_id': avatar_id}, _timeout=self.cookie_lifespan)
+        return self._mkTicket('TGC-', {'avatar_id': avatar_id}, timeout=self.tgt_lifespan)
 
 
     def useTicketGrantingCookie(self, ticket, service):
@@ -546,7 +547,7 @@ class CouchDBTicketStore(object):
                 'service_ticket': xml_escape(st)
             }
             reqlib = self.reqlib
-            d = reqlib.post(service, data=data, _timeout=30).addCallback(reqlib.content)
+            d = reqlib.post(service.encode('utf-8'), data=data, timeout=30).addCallback(reqlib.content)
             dlist.append(d)
         return defer.DeferredList(dlist, consumeErrors=True)
 

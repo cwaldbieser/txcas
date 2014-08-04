@@ -17,12 +17,16 @@ def valid_service(url):
 
 
 # How long do transient tickets last?
-TICKET_TIMEOUT = 10
+LT_TIMEOUT = 60 * 5
+ST_TIMEOUT = 10
+PT_TIMEOUT = 10
+PGT_TIMEOUT = 60 * 5
 
 # How long do user sessions last?
-AUTH_TIMEOUT = 60 * 60 * 24 * 2
+AUTH_TIMEOUT = 60 * 60 * 24
 
 # What endpoint to listen on
+# E.g. 'ssl:port=443:privateKey=/etc/ssl/server.pem:extraCertChain=/etc/ssl/chain.pem:sslmethod=SSLv3_METHOD:dhParameters=dh_param_1024.pem'
 ENDPOINT = 'tcp:8080'
 
 # Require cookies to be sent over SSL?
@@ -41,10 +45,14 @@ from txcas.service import CASService
 application = service.Application('txcas')
 cas_service = CASService(
                     ENDPOINT,
-                    ticket_timeout=TICKET_TIMEOUT,
-                    auth_timeout=AUTH_TIMEOUT,
+                    lt_timeout=LT_TIMEOUT,
+                    st_timeout=ST_TIMEOUT,
+                    pt_timeout=PT_TIMEOUT,
+                    pgt_timeout=PGT_TIMEOUT,
+                    tgt_timeout=AUTH_TIMEOUT,
                     valid_service=valid_service,
                     requireSSL=REQUIRE_SSL,
                     page_views=PAGE_VIEWS,
                     validate_pgturl=VALIDATE_PGTURL)
 cas_service.setServiceParent(application)
+

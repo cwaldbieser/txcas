@@ -1,8 +1,18 @@
 
+[CAS]
+port = 9800
+https = 1
+key_pem = ssl/serverkey.pem
+cert_pem = ssl/servercert.pem
+validate_pgturl = 0
+
 [PLUGINS]
 cred_checker = LDAPSimpleBindChecker
 realm = LDAPRealm
 ticket_store = CouchDBTicketStore
+
+[InMemoryTicketStore]
+verify_cert = True
 
 [LDAP]
 host = 127.0.0.1

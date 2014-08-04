@@ -45,6 +45,8 @@ def escape_filter_chars(assertion_value,escape_mode=0):
         s = s.replace('\x00', r'\00')
     return s
 
+class LDAPAdminBindError(Exception):
+    pass
 
 class LDAPSimpleBindChecker(object):
 
@@ -92,7 +94,11 @@ class LDAPSimpleBindChecker(object):
         bindpw = self._bindpw
         query = self._query_template % {'username': escape_filter_chars(username)}
         
-        yield client.bind(binddn, bindpw)
+        try:
+            yield client.bind(binddn, bindpw)
+        except Exception as ex:
+            log.err(ex)
+            raise LDAPAdminBindError("Error binding with admin DN: %s." % binddn)
         o = ldapsyntax.LDAPEntry(client, basedn)
         results = yield o.search(filterText=query, attributes=['uid'])
         if len(results) != 1:

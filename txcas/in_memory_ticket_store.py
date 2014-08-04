@@ -10,6 +10,7 @@ from xml.sax.saxutils import escape as xml_escape
 # Application modules
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         NotSSOService
+import txcas.http
 from txcas.interface import ITicketStore
 
 # External modules
@@ -26,15 +27,16 @@ class InMemoryTicketStore(object):
     """
     implements(IPlugin, ITicketStore)
 
-    lifespan = 10
     lt_lifespan = 60 * 5
-    cookie_lifespan = 60 * 60 * 24 * 2
+    st_lifespan = 10
+    pt_lifespan = 10
+    tgt_lifespan = 60 * 60 * 24 * 2
     pgt_lifespan = 60 * 60 * 2
     charset = string.ascii_letters + string.digits + '-'
 
 
     def __init__(self, reactor=reactor, valid_service=None, 
-                    is_sso_service=None, _debug=False):
+                    is_sso_service=None, verify_cert=True, _debug=False):
         self.reactor = reactor
         self._tickets = {}
         self._delays = {}
@@ -42,6 +44,10 @@ class InMemoryTicketStore(object):
         self.is_sso_service = is_sso_service or (lambda x: True)
         self._debug = _debug
         self._expire_callback = (lambda ticket, data, explicit: None)
+        if verify_cert:
+            self.reqlib = treq
+        else:
+            self.reqlib = txcas.http
 
     def debug(self, msg):
         if self._debug:
@@ -67,7 +73,7 @@ class InMemoryTicketStore(object):
         return r
 
 
-    def _mkTicket(self, prefix, data, _timeout=None):
+    def _mkTicket(self, prefix, data, timeout):
         """
         Create a ticket prefixed with C{prefix}
 
@@ -76,8 +82,8 @@ class InMemoryTicketStore(object):
         @param prefix: String prefix for the token.
         @param data: Data associated with this ticket (which will be returned
             when L{_useTicket} is called).
+        @param timeout: The time in seconds the ticket lasts.
         """
-        timeout = _timeout or self.lifespan
         ticket = self._generate(prefix)
         self._tickets[ticket] = data
         self.debug("Added ticket '%s' with data: %s" % (ticket, str(data)))
@@ -166,7 +172,7 @@ class InMemoryTicketStore(object):
         def cb(_):
             return self._mkTicket('LT-', {
                 'service': service,
-            }, _timeout=self.lt_lifespan)
+            }, timeout=self.lt_lifespan)
         return d.addCallback(cb)
 
 
@@ -202,7 +208,7 @@ class InMemoryTicketStore(object):
                 'service': service,
                 'primary_credentials': primaryCredentials,
                 'tgt': tgt_id,
-            })
+            }, timeout=self.st_lifespan)
         d = self._validService(service)
         d.addCallback(doit)
         d.addCallback(self._informTGTOfService, service, tgt_id)
@@ -244,7 +250,7 @@ class InMemoryTicketStore(object):
                 'pgt': pgt,
                 'tgt': tgt,
                 'proxy_chain': pgt_info['proxy_chain'],
-            })
+            }, timeout=self.pt_lifespan)
         d = self._validService(service)
         d.addCallback(doit)
         d.addCallback(self._informTGTOfService, service, tgt)
@@ -306,7 +312,7 @@ class InMemoryTicketStore(object):
                 new_proxy_chain = [pgturl]
             data['proxy_chain'] = new_proxy_chain 
         
-            return self._mkTicket('PGT-', data, _timeout=self.pgt_lifespan).addCallback(
+            return self._mkTicket('PGT-', data, timeout=self.pgt_lifespan).addCallback(
                 self._informTGTOfPGT, tgt).addCallback(
                 lambda pgt : {'iou': iou, 'pgt': pgt})
         
@@ -318,7 +324,7 @@ class InMemoryTicketStore(object):
         """
         Create a ticket to be used in a cookie.
         """
-        return self._mkTicket('TGC-', {'avatar_id': avatar_id}, _timeout=self.cookie_lifespan)
+        return self._mkTicket('TGC-', {'avatar_id': avatar_id}, timeout=self.tgt_lifespan)
 
 
     def useTicketGrantingCookie(self, ticket, service):
@@ -388,7 +394,8 @@ class InMemoryTicketStore(object):
                 'issue_instant': xml_escape(issue_instant),
                 'service_ticket': xml_escape(st)
             }
-            d = treq.post(service, data=data, _timeout=30).addCallback(treq.content)
+            reqlib = self.reqlib
+            d = reqlib.post(service, data=data, timeout=30).addCallback(reqlib.content)
             dlist.append(d)
         return defer.DeferredList(dlist, consumeErrors=True)
 

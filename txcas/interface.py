@@ -9,9 +9,10 @@ class ICASUser(Interface):
 
 class ITicketStore(Interface):
     
-    lifespan = Attribute('ST/PT lifespan in seconds.')
     lt_lifespan = Attribute('LT lifespan in seconds.')
-    cookie_lifespan = Attribute('TGC lifespan in seconds.')
+    st_lifespan = Attribute('ST lifespan in seconds.')
+    pt_lifespan = Attribute('PT lifespan in seconds.')
+    tgt_lifespan = Attribute('TGC lifespan in seconds.')
     pgt_lifespan = Attribute('PGT lifespan in seconds.')
     
     def mkLoginTicket(service):

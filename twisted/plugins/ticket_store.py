@@ -5,7 +5,11 @@ _scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
 #txcas.settings.dump_settings(_scp)
 
 from txcas.in_memory_ticket_store import InMemoryTicketStore
-ticket_store = InMemoryTicketStore()
+verify_cert = False
+if _scp.has_section("InMemoryTicketStore"):
+    if _scp.has_option("InMemoryTicketStore", "verify_cert"):
+        verify_cert = bool(_scp.getint("InMemoryTicketStore", "verify_cert"))
+ticket_store = InMemoryTicketStore(verify_cert=True)
 
 if txcas.settings.has_options(_scp, {'CouchDB': ['host', 'port', 'db', 'user', 'passwd']}):
     from txcas.couchdb_ticket_store import CouchDBTicketStore

@@ -22,7 +22,7 @@ class WebClientContextFactory(ClientContextFactory):
     def getContext(self, hostname, port):
         return ClientContextFactory.getContext(self)
 
-def request(method, url, headers=None, params=None, data=None, auth=None):
+def request(method, url, headers=None, params=None, data=None, auth=None, timeout=None):
     p = urlparse.urlparse(url)
     if p.scheme.lower() == 'https':
         contextFactory = WebClientContextFactory()
@@ -55,6 +55,15 @@ def request(method, url, headers=None, params=None, data=None, auth=None):
         url,
         headers=headers,
         bodyProducer=body)
+
+    if timeout is not None:
+        timeoutCall = reactor.callLater(timeout, d.cancel)
+        def completed(passthrough):
+            if timeoutCall.active():
+                timeoutCall.cancel()
+            return passthrough
+        d.addBoth(completed)
+
     return d
 
 def post(*args, **kwds):

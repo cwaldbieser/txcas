@@ -13,6 +13,7 @@ from xml.sax.saxutils import escape as xml_escape
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         CookieAuthFailed, NotSSOService, NotHTTPSError, \
                         InvalidProxyCallback
+import txcas.http
 from txcas.interface import ICASUser, ITicketStore
 from txcas.utils import http_status_filter
 
@@ -167,7 +168,7 @@ class ServerApp(object):
         @param checkers: A list of credential checkers to try (in order).
         @param validService: A callable that takes a service as an argument 
             and returns True if the server will authenticate for that service.
-        @param requireSSL: Require SSL for Tcket Granting Cookie
+        @param requireSSL: Require SSL for Ticket Granting Cookie
         @param page_views: A mapping of functions that are used to render
             custom pages.
             - All views may either be synchronous or async (deferreds).
@@ -376,9 +377,9 @@ class ServerApp(object):
                     Username: <input type="text" name="username" />
                     <br />Password: <input type="password" name="password" />
                     <input type="hidden" name="lt" value="%(lt)s" />
-        ''')) % {
+        ''') % {
             'lt': cgi.escape(ticket),
-        }
+        })
         if service != "":
             html_parts.append(
                 '            '
@@ -756,7 +757,7 @@ class ServerApp(object):
             return self.ticket_store.mkProxyGrantingTicket(
                 service, ticket, tgt, pgturl, proxy_chain=proxy_chain)
         
-        def _sendTicketAndIou(pgt_info, pgturl):
+        def _sendTicketAndIou(pgt_info, pgturl, reqlib):
             """
             """
             pgt = pgt_info['pgt']
@@ -768,9 +769,9 @@ class ServerApp(object):
                 return pgtiou
                 
             q = {'pgtId': pgt, 'pgtIou': iou}
-            d = treq.get(pgturl, params=q, timeout=30)
+            d = reqlib.get(pgturl, params=q, timeout=30)
             d.addCallback(http_status_filter, [(200, 200)], InvalidProxyCallback)
-            d.addCallback(treq.content)
+            d.addCallback(reqlib.content)
             d.addCallback(iou_cb, iou)
             return d
             
@@ -778,19 +779,19 @@ class ServerApp(object):
             data['iou'] = iou
             return data
         
+        reqlib = treq
         if self.validate_pgturl:
             p = urlparse.urlparse(pgturl)
             if p.scheme.lower() != "https":
                 raise NotHTTPSError("The pgtUrl '%s' is not HTTPS.")
-            # Need some way to tell treq that HTTPS URLs should *not* be
-            # verified in this case.
+            reqlib = txcas.http
         
-        d = treq.get(pgturl)
+        d = reqlib.get(pgturl)
         d.addCallback(http_status_filter, [(200, 200)], InvalidProxyCallback)
-        d.addCallback(treq.content)
+        d.addCallback(reqlib.content)
         
         d.addCallback(_mkPGT)
-        d.addCallback(_sendTicketAndIou, pgturl)
+        d.addCallback(_sendTicketAndIou, pgturl, reqlib)
         d.addCallback(_package_result, data)
         
         return d
