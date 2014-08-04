@@ -12,7 +12,9 @@ from treq import content, text_content, json_content
 
 from twisted.internet import reactor
 from twisted.internet.ssl import ClientContextFactory
-from twisted.web.client import Agent, FileBodyProducer, readBody
+from twisted.web.client import Agent, BrowserLikeRedirectAgent, \
+                            FileBodyProducer, readBody
+from twisted.python import log
 from twisted.web.http_headers import Headers
 
 class WebClientContextFactory(ClientContextFactory):
@@ -49,7 +51,7 @@ def request(method, url, headers=None, params=None, data=None, auth=None, timeou
             if not headers.hasHeader('Authorization'):
                 headers.addRawHeader('Authorization', auth)
 
-    agent = Agent(reactor, contextFactory)
+    agent = BrowserLikeRedirectAgent(Agent(reactor, contextFactory))
     d = agent.request(
         method, 
         url,
@@ -58,12 +60,12 @@ def request(method, url, headers=None, params=None, data=None, auth=None, timeou
 
     if timeout is not None:
         timeoutCall = reactor.callLater(timeout, d.cancel)
-        def completed(passthrough):
+        def completed(passthrough, timeoutCall):
             if timeoutCall.active():
                 timeoutCall.cancel()
             return passthrough
-        d.addBoth(completed)
-
+        d.addBoth(completed, timeoutCall)
+        
     return d
 
 def post(*args, **kwds):
