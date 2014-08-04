@@ -89,13 +89,18 @@ def log_cas_event(label, attribs):
     tail = ' '.join(parts)
     log.msg('''[INFO][CAS] label="%s" %s''' % (label, tail))
 
-def log_http_event(request):
+def log_http_event(request, redact_args=None):
     """
     """
+    args = dict(request.args)
+    if redact_args is not None:
+        for arg in redact_args:
+            if arg in args:
+                args[arg] = ['*******']
     msg = '''[INFO][HTTP] method="%(method)s path="%(path)s" args="%(args)s"''' % {
         'path': request.path,
         'method': request.method,
-        'args': request.args,
+        'args': args,
         }
     log.msg(msg)
 
@@ -464,7 +469,7 @@ class ServerApp(object):
         Accept a username/password, verify the credentials and redirect them
         appropriately.
         """
-        log_http_event(request)
+        log_http_event(request, redact_args=['password'])
         service = request.args.get('service', [""])[0]
         renew = request.args.get('renew', [""])[0]
         username = request.args.get('username', [None])[0]
