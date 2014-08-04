@@ -89,6 +89,16 @@ def log_cas_event(label, attribs):
     tail = ' '.join(parts)
     log.msg('''[INFO][CAS] label="%s" %s''' % (label, tail))
 
+def log_http_event(request):
+    """
+    """
+    msg = '''[INFO][HTTP] method="%(method)s path="%(path)s" args="%(args)s"''' % {
+        'path': request.path,
+        'method': request.method,
+        'args': request.args,
+        }
+    log.msg(msg)
+
 def log_ticket_expiration(ticket, data, explicit):
     """
     """
@@ -228,6 +238,7 @@ class ServerApp(object):
         OR
         authenticate using an existing TGC.
         """
+        log_http_event(request)
         service = request.args.get('service', [""])[0]
         renew = request.args.get('renew', [""])[0]
         if renew != "":
@@ -453,6 +464,7 @@ class ServerApp(object):
         Accept a username/password, verify the credentials and redirect them
         appropriately.
         """
+        log_http_event(request)
         service = request.args.get('service', [""])[0]
         renew = request.args.get('renew', [""])[0]
         username = request.args.get('username', [None])[0]
@@ -508,6 +520,7 @@ class ServerApp(object):
 
     @app.route('/logout', methods=['GET'])
     def logout_GET(self, request):
+        log_http_event(request)
         service = request.args.get('service', [""])[0]
         def _validService(_, service):
             def eb(err):
@@ -553,6 +566,7 @@ class ServerApp(object):
         """
         Validate a service ticket, consuming the ticket in the process.
         """
+        log_http_event(request)
         ticket = request.args.get('ticket', [""])[0]
         service = request.args.get('service', [""])[0]
         renew = request.args.get('renew', [""])[0]
@@ -604,10 +618,12 @@ class ServerApp(object):
 
     @app.route('/serviceValidate', methods=['GET'])
     def serviceValidate_GET(self, request):
+        log_http_event(request)
         return self._serviceOrProxyValidate(request, False)
         
     @app.route('/proxyValidate', methods=['GET'])
     def proxyValidate_GET(self, request):
+        log_http_event(request)
         return self._serviceOrProxyValidate(request, True)
     
     def _serviceOrProxyValidate(self, request, proxyValidate=True):
@@ -762,13 +778,17 @@ class ServerApp(object):
             """
             pgt = pgt_info['pgt']
             iou = pgt_info['iou']
-            def iou_cb(_, pgtiou):
+            def iou_cb(resp_text, pgtiou):
                 """
                 Return the iou parameter.
                 """
                 return pgtiou
                 
             q = {'pgtId': pgt, 'pgtIou': iou}
+            log_cas_event("Sending pgtId and pgtIou to client.", [
+                ('pgturl', pgturl),
+                ('pgtIou', iou),
+                ('pgtId', pgt),])
             d = reqlib.get(pgturl, params=q, timeout=30)
             d.addCallback(http_status_filter, [(200, 200)], InvalidProxyCallback)
             d.addCallback(reqlib.content)
@@ -784,8 +804,9 @@ class ServerApp(object):
             p = urlparse.urlparse(pgturl)
             if p.scheme.lower() != "https":
                 raise NotHTTPSError("The pgtUrl '%s' is not HTTPS.")
+        else:
             reqlib = txcas.http
-        
+            
         d = reqlib.get(pgturl)
         d.addCallback(http_status_filter, [(200, 200)], InvalidProxyCallback)
         d.addCallback(reqlib.content)
@@ -798,6 +819,7 @@ class ServerApp(object):
 
     @app.route('/proxy', methods=['GET'])
     def proxy_GET(self, request):
+        log_http_event(request)
         try:
             pgt = request.args['pgt'][0]
             targetService = request.args['targetService'][0]
