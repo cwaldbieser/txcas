@@ -11,7 +11,8 @@ Examples
 
 Running the Server
 ------------------
-Edit the settings in :file:`cas.tac` then run it with::
+Copy :file:`cas.tac.example` to :file:`cas.tac`.  Then
+edit the settings in :file:`cas.tac` then run it with::
 
     $ twistd -n -y cas.tac
 
@@ -37,8 +38,8 @@ Service 3 runs on port 9803.
 Service 4 runs on port 9804.
 All services listen on localhost (127.0.0.1).
 
-Not all configuration options are honored by the demonstration.
-Specifically, the CAS server and the services run over HTTP (no SSL)
+The demonstration program does not use the cas.tac endpoint 
+configuration.  The CAS server and the services run over HTTP (no SSL)
 in the demonstration.  Running over HTTPS would require setting up
 a self-signed cert at the minimum, and I really just wanted the
 demo to run without any extra configuration.
@@ -73,12 +74,10 @@ dependencies.  E.g. the LDAP-based plugins require ldaptor
 
 Configuration
 -------------
-The actual endpoint options for the service (port, HTTP or HTTPS, cert files) are
-configured in :file:`cas.tac`.  For convenience, so other options can also be
-configured in this file and hold precedence over other config files.
-
-The main configuration file is called 'cas.cfg' or '.casrc' if located in your
-$HOME on UNIX-like systems.  The meanings of the sections are as follows:
+The endpoint for the service (port, HTTP or HTTPS, cert files, SSL options, etc.) 
+are configured in :file:`cas.tac`.  
+The main configuration file is called :file:`cas.cfg` (:file:`.casrc` if located in your
+$HOME on UNIX-like systems).  The meanings of the sections are as follows:
 
 - CAS: General CAS options
     - validate_pgturl: 1 (verify peer during proxy callback as per CAS protocol) or
@@ -110,6 +109,7 @@ LDAP Configuration
 ==================
 The LDAPSimpleBindChecker and LDAPUSerRealm plugins require a configuration
 section called "LDAP" that supports the following options:
+
 - host
 - port
 - basedn
@@ -120,6 +120,7 @@ CouchDB Configuration
 =====================
 The CouchDBTicketStore plugin requires a configuration section called
 "CouchDB" with the following options:
+
 - host
 - port
 - db
@@ -132,5 +133,6 @@ The CouchDBTicketStore plugin requires a configuration section called
 
 The CouchDB database itself will need to be configured with the appropriate views.
 You can set up the database views by running the :program:`setup_couchdb.py` program.
-
+You should create an empty database before running the script and have DB admin
+credentials.  The script will prompt you for the necessay information.
 
