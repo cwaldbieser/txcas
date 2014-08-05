@@ -32,6 +32,7 @@ class InMemoryTicketStore(object):
     pt_lifespan = 10
     tgt_lifespan = 60 * 60 * 24 * 2
     pgt_lifespan = 60 * 60 * 2
+    ticket_size = 256
     charset = string.ascii_letters + string.digits + '-'
 
 
@@ -67,10 +68,11 @@ class InMemoryTicketStore(object):
         return defer.maybeDeferred(self.is_sso_service, service).addCallback(cb)
 
     def _generate(self, prefix):
-        r = prefix
-        while len(r) < 256:
-            r += random.choice(self.charset)
-        return r
+        r = list(prefix)
+        size = self.ticket_size
+        while len(r) < size:
+            r.append(random.choice(self.charset))
+        return ''.join(r)
 
 
     def _mkTicket(self, prefix, data, timeout):
@@ -296,7 +298,8 @@ class InMemoryTicketStore(object):
         
         def doit(_):
             charset = self.charset
-            iou = 'PGTIOU-' + (''.join([random.choice(charset) for n in range(256)]))
+            size = self.ticket_size
+            iou = self._generate('PGTIOU-')
             data = {
                 'avatar_id': tgt_info['avatar_id'],
                 'service': service,

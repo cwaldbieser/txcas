@@ -41,6 +41,7 @@ class CouchDBTicketStore(object):
     tgt_lifespan = 60 * 60 * 24 * 2
     pgt_lifespan = 60 * 60 * 2
     charset = string.ascii_letters + string.digits + '-'
+    ticket_size = 256
     poll_expired = 60 * 5
 
 
@@ -87,7 +88,8 @@ class CouchDBTicketStore(object):
 
     def _generate(self, prefix):
         r = prefix
-        while len(r) < 256:
+        size = self.ticket_size
+        while len(r) < size:
             r += random.choice(self.charset)
         return r
 
@@ -456,7 +458,7 @@ class CouchDBTicketStore(object):
         del tgt_info[u'_rev']
         yield self._validService(service)
         charset = self.charset
-        iou = 'PGTIOU-' + (''.join([random.choice(charset) for n in range(256)]))
+        iou = self._generate('PGTIOU-')
         data = {
             'avatar_id': tgt_info['avatar_id'],
             'service': service,

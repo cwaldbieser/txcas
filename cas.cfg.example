@@ -6,6 +6,7 @@ pt_lifespan = 10
 pgt_lifespan = 600
 tgt_lifespan = 86400
 validate_pgturl = 0
+ticket_size = 256
 
 [PLUGINS]
 cred_checker = LDAPSimpleBindChecker

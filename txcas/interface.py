@@ -14,6 +14,7 @@ class ITicketStore(Interface):
     pt_lifespan = Attribute('PT lifespan in seconds.')
     tgt_lifespan = Attribute('TGC lifespan in seconds.')
     pgt_lifespan = Attribute('PGT lifespan in seconds.')
+    ticket_size = Attribute('Size of ticket ID in characters.')
     
     def mkLoginTicket(service):
         """

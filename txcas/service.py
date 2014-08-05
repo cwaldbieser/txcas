@@ -57,6 +57,7 @@ class CASService(Service):
                     'pgt_lifespan': 600,
                     'tgt_lifespan': 86400,
                     'validate_pgturl': 1,
+                    'ticket_size': 256,
                 },
                 'PLUGINS': {
                     'cred_checker': 'DemoChecker',
@@ -73,12 +74,20 @@ class CASService(Service):
         pt_lifespan = get_int_opt(scp, 'CAS', 'pt_lifespan')
         pgt_lifespan = get_int_opt(scp, 'CAS', 'pgt_lifespan')
         tgt_lifespan = get_int_opt(scp, 'CAS', 'tgt_lifespan')
+        ticket_size = get_int_opt(scp, 'CAS', 'ticket_size')
         
         ticket_store.lt_lifespan = lt_lifespan
+        print("[CONFIG] Login Ticket Lifespan: %d seconds" % lt_lifespan)
         ticket_store.st_lifespan = st_lifespan
+        print("[CONFIG] Service Ticket Lifespan: %d seconds" % st_lifespan)
         ticket_store.pt_lifespan = pt_lifespan
+        print("[CONFIG] Proxy Ticket Lifespan: %d seconds" % pt_lifespan)
         ticket_store.pgt_lifespan = pgt_lifespan
+        print("[CONFIG] Proxy Granting Ticket Lifespan: %d seconds" % pgt_lifespan)
         ticket_store.tgt_lifespan = tgt_lifespan
+        print("[CONFIG] Ticket Granting Ticket Lifespan: %d seconds" % tgt_lifespan)
+        ticket_store.ticket_size = ticket_size
+        print("[CONFIG] Ticket Identifier Size: %d characters" % ticket_size)
 
             
         # Choose the plugin that implements ICredentialsChecker.
