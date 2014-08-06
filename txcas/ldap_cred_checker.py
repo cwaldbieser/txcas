@@ -1,4 +1,7 @@
 
+# Application modules
+import txcas.settings
+
 # External modules
 from ldaptor.protocols.ldap import ldapclient, ldapsyntax, ldapconnector
 from ldaptor.protocols.ldap.ldaperrors import LDAPInvalidCredentials
@@ -6,11 +9,14 @@ from ldaptor.protocols.ldap.ldaperrors import LDAPInvalidCredentials
 from twisted.cred import credentials
 from twisted.cred.checkers import ICredentialsChecker
 from twisted.cred.error import UnauthorizedLogin
+from twisted.cred.strcred import ICheckerFactory
 from twisted.internet import defer, reactor
 from twisted.plugin import IPlugin
 from twisted.python import log
 from zope.interface import implements
 
+#==============================================================================
+#==============================================================================
 
 def escape_filter_chars(assertion_value,escape_mode=0):
     """
@@ -45,8 +51,46 @@ def escape_filter_chars(assertion_value,escape_mode=0):
         s = s.replace('\x00', r'\00')
     return s
 
+#==============================================================================
+#==============================================================================
+
 class LDAPAdminBindError(Exception):
     pass
+
+#==============================================================================
+#==============================================================================
+
+class LDAPSimpleBindCheckerFactory(object):
+    """
+    A checker factory for an LDAPSimpleBindChecker.
+    """
+    # The class needs to implement both of these interfaces
+    # for the plugin system to find our factory.
+    implements(ICheckerFactory, IPlugin)
+
+    # This tells AuthOptionsMixin how to find this factory.
+    authType = "ldap_simple_bind"
+
+    # This is a one-line explanation of what arguments, if any,
+    # your particular cred plugin requires at the command-line.
+    argStringFormat = "A colon-separated key=value list."
+
+    # This help text can be multiple lines. It will be displayed
+    # when someone uses the "--help-auth-type special" command.
+    authHelp = '''Uses a 2-stage BIND to determine if the credentials''' \
+               ''' presented are valid.'''
+
+    # The types of credentials this factory supports.
+    credentialInterfaces = (credentials.IUsernamePassword,)
+
+    # This will be called once per command-line.
+    def generateChecker(self, argstring=""):
+        scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
+        settings = txcas.settings.export_settings_to_dict(scp)
+        ldap_settings = settings.get('LDAP', {})    
+        argdict = dict((x.split('=') for x in argstring.split(':')))
+        ldap_settings.update(argdict)
+        return LDAPSimpleBindChecker(**ldap_settings)
 
 class LDAPSimpleBindChecker(object):
 

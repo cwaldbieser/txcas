@@ -74,6 +74,17 @@ def get_plugin(tagname, iface, all_matches=False):
     else:
         return results
 
+def get_plugins_by_predicate(iface, predicate):
+    """
+    Return a list of all plugins for interface `iface` that
+    satisfy `predicate`.
+    """
+    results = []
+    for plugin in getPlugins(iface):
+        if predicate(plugin):
+            results.append(plugin)
+    return results
+
 def dump_settings(scp):
     """
     """
@@ -81,3 +92,11 @@ def dump_settings(scp):
         for option in scp.options(section):
             print "%s, %s: %s" % (section, option, scp.get(section, option))
 
+def export_settings_to_dict(scp):
+    """
+    """
+    settings = {}
+    for section in scp.sections():
+        for option in scp.options(section):
+            settings.setdefault(section, {})[option] = scp.get(section, option)
+    return settings

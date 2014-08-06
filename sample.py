@@ -452,7 +452,7 @@ if __name__ == "__main__":
     if run_cas_server:
         # server
         from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
-        from twisted.cred.checkers import ICredentialsChecker
+        from twisted.cred.strcred import ICheckerFactory
         from txcas.server import ServerApp
 
         page_views = {'login': custom_login}
@@ -470,20 +470,30 @@ if __name__ == "__main__":
                 scp.get('PLUGINS', 'ticket_store'), ITicketStore)
         assert ticket_store is not None, "Ticket Store has not been configured!"
 
-            
-        # Choose the plugin that implements ICredentialsChecker.
-        checker = txcas.settings.get_plugin(
-                scp.get('PLUGINS', 'cred_checker'), ICredentialsChecker)
-        if checker is None:
-            checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
-
         # Choose the plugin that implements IRealm.
         realm = txcas.settings.get_plugin(
                 scp.get('PLUGINS', 'realm'), IRealm)
         assert realm is not None, "User Realm has not been configured!"
 
+        # Choose plugin(s) that implement ICredentialChecker 
+        try:
+            tag_args =  scp.get('PLUGINS', 'cred_checker')
+        except Exception:
+            print("[ERROR] No valid credential checker was configured.")
+            sys.exit(1)
+        parts = tag_args.split(':')
+        tag = parts[0]
+        args = ':'.join(parts[1:])
+        factories = txcas.settings.get_plugins_by_predicate(
+                        ICheckerFactory, 
+                        lambda x: x.authType == tag)
+        if len(factories) == 0:
+            checkers= [InMemoryUsernamePasswordDatabaseDontUse(foo='password')]
+        else:
+            checkers=[f.generateChecker(args) for f in factories]
+
         #Create the CAS server app.
-        server_app = ServerApp(ticket_store, realm, [checker], lambda x:True,
+        server_app = ServerApp(ticket_store, realm, checkers, lambda x:True,
                                requireSSL=False, page_views=page_views, validate_pgturl=False)
 
 

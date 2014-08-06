@@ -2,6 +2,7 @@
 
 from zope.interface import implements
 
+from twisted.cred import credentials, strcred
 from twisted.python import usage
 from twisted.plugin import IPlugin
 from twisted.application.service import IServiceMaker
@@ -12,7 +13,11 @@ from txcas.service import CASService
 
 
 
-class Options(usage.Options):
+class Options(usage.Options, strcred.AuthOptionMixin):
+    # This part is optional; it tells AuthOptionMixin what
+    # kinds of credential interfaces the user can give us.
+    supportedInterfaces = (credentials.IUsernamePassword,)
+
     optFlags = [["ssl", "s", "Use SSL"],]
     optParameters = [
                         ["port", "p", 9800, "The port number to listen on.", int],
@@ -44,8 +49,8 @@ class MyServiceMaker(object):
         if privateKey is not None:
             parts.append('privateKey=%s' % privateKey)
         endpoint = ':'.join(parts)
-        print "endpoint", endpoint
-        return CASService(endpoint)
+        checkers = options.get("credCheckers", None)
+        return CASService(endpoint, checkers=checkers)
 
 
 # Now construct an object which *provides* the relevant interfaces

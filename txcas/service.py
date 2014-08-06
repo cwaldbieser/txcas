@@ -9,8 +9,8 @@ import txcas.settings
 
 # External modules
 from twisted.application.service import Service
-from twisted.cred.checkers import ICredentialsChecker
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
+from twisted.cred.strcred import ICheckerFactory
 from twisted.cred.portal import IRealm
 from twisted.internet import reactor
 from twisted.internet.endpoints import serverFromString
@@ -43,7 +43,7 @@ class CASService(Service):
     Service for CAS server
     """
 
-    def __init__(self, endpoint_s):
+    def __init__(self, endpoint_s, checkers=None):
         """
         """
         self.port_s = endpoint_s
@@ -89,13 +89,27 @@ class CASService(Service):
         ticket_store.ticket_size = ticket_size
         print("[CONFIG] Ticket Identifier Size: %d characters" % ticket_size)
 
-            
-        # Choose the plugin that implements ICredentialsChecker.
-        checker = txcas.settings.get_plugin(
-                scp.get('PLUGINS', 'cred_checker'), ICredentialsChecker)
-        if checker is None:
-            checker = InMemoryUsernamePasswordDatabaseDontUse(foo='password')
-        print("[CONFIG] Credential Checker: %s" % checker.__class__.__name__)
+   
+        # Choose plugin(s) that implement ICredentialChecker 
+        if checkers is None:        
+            try:
+                tag_args =  scp.get('PLUGINS', 'cred_checker')
+            except Exception:
+                print("[ERROR] No valid credential checker was configured.")
+                sys.exit(1)
+            parts = tag_args.split(':')
+            tag = parts[0]
+            args = ':'.join(parts[1:])
+            factories = txcas.settings.get_plugins_by_predicate(
+                            ICheckerFactory, 
+                            lambda x: x.authType == tag)
+            if len(factories) == 0:
+                checkers= [InMemoryUsernamePasswordDatabaseDontUse(foo='password')]
+            else:
+                checkers=[f.generateChecker(args) for f in factories]
+
+        for checker in checkers:
+            print("[CONFIG] Credential Checker: %s" % checker.__class__.__name__)
 
         # Choose the plugin that implements IRealm.
         realm = txcas.settings.get_plugin(
@@ -119,7 +133,7 @@ class CASService(Service):
         app = ServerApp(
                     ticket_store, 
                     realm, 
-                    [checker],
+                    checkers,
                     validService=_valid_service, 
                     requireSSL=requireSSL,
                     page_views=page_views, 

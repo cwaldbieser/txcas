@@ -9,7 +9,7 @@ validate_pgturl = 0
 ticket_size = 256
 
 [PLUGINS]
-cred_checker = LDAPSimpleBindChecker
+cred_checker = ldap_simple_bind
 realm = LDAPRealm
 ticket_store = CouchDBTicketStore
 
