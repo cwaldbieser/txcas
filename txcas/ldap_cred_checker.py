@@ -1,6 +1,11 @@
 
+# Standard library
+from textwrap import dedent
+import sys
+
 # Application modules
 import txcas.settings
+import txcas.utils
 
 # External modules
 from ldaptor.protocols.ldap import ldapclient, ldapsyntax, ldapconnector
@@ -60,38 +65,6 @@ class LDAPAdminBindError(Exception):
 #==============================================================================
 #==============================================================================
 
-class LDAPSimpleBindCheckerFactory(object):
-    """
-    A checker factory for an LDAPSimpleBindChecker.
-    """
-    # The class needs to implement both of these interfaces
-    # for the plugin system to find our factory.
-    implements(ICheckerFactory, IPlugin)
-
-    # This tells AuthOptionsMixin how to find this factory.
-    authType = "ldap_simple_bind"
-
-    # This is a one-line explanation of what arguments, if any,
-    # your particular cred plugin requires at the command-line.
-    argStringFormat = "A colon-separated key=value list."
-
-    # This help text can be multiple lines. It will be displayed
-    # when someone uses the "--help-auth-type special" command.
-    authHelp = '''Uses a 2-stage BIND to determine if the credentials''' \
-               ''' presented are valid.'''
-
-    # The types of credentials this factory supports.
-    credentialInterfaces = (credentials.IUsernamePassword,)
-
-    # This will be called once per command-line.
-    def generateChecker(self, argstring=""):
-        scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
-        settings = txcas.settings.export_settings_to_dict(scp)
-        ldap_settings = settings.get('LDAP', {})    
-        argdict = dict((x.split('=') for x in argstring.split(':')))
-        ldap_settings.update(argdict)
-        return LDAPSimpleBindChecker(**ldap_settings)
-
 class LDAPSimpleBindChecker(object):
 
     implements(IPlugin, ICredentialsChecker)
@@ -150,5 +123,66 @@ class LDAPSimpleBindChecker(object):
         entry = results[0]
         defer.returnValue(entry.dn)
         
+class LDAPSimpleBindCheckerFactory(object):
+    """
+    A checker factory for an LDAPSimpleBindChecker.
+    """
+    # The class needs to implement both of these interfaces
+    # for the plugin system to find our factory.
+    implements(ICheckerFactory, IPlugin)
+
+    # This tells AuthOptionsMixin how to find this factory.
+    authType = "ldap_simple_bind"
+
+    # This is a one-line explanation of what arguments, if any,
+    # your particular cred plugin requires at the command-line.
+    argStringFormat = "A colon-separated key=value list."
+
+    # This help text can be multiple lines. It will be displayed
+    # when someone uses the "--help-auth-type special" command.
+    authHelp = dedent('''\
+            Uses a 2-stage BIND to determine if the credentials 
+            presented are valid.  Valid options include:
+            
+            - host
+            - port
+            - basedn
+            - binddn
+            - bindpw 
+            - query_template: default -> (uid=%(username)s)
+              The %(username)s part will be interpolated with the (escaped)
+              avatar ID.
+            ''')
+
+    # The types of credentials this factory supports.
+    credentialInterfaces = (credentials.IUsernamePassword,)
+
+    # This will be called once per command-line.
+    def generateChecker(self, argstring=""):
+        scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
+        settings = txcas.settings.export_settings_to_dict(scp)
+        ldap_settings = settings.get('LDAP', {})    
+        if argstring.strip() != "":
+            argdict = dict((x.split('=') for x in argstring.split(':')))
+            ldap_settings.update(argdict)
+        buf = ["[CONFIG][LDAPSimpleBindChecker] Settings:"]
+        for k in sorted(ldap_settings.keys()):
+            if k != "bindpw":
+                v = ldap_settings[k]
+            else:
+                v = "*******"
+            buf.append(" - %s: %s" % (k, v))
+        sys.stderr.write('\n'.join(buf)) 
+        sys.stderr.write('\n') 
+        missing = txcas.utils.get_missing_args(
+                    LDAPSimpleBindChecker.__init__, ldap_settings, ['self'])
+        if len(missing) > 0:
+            sys.stderr.write(
+                "[ERROR][LDAPSimpleBindChecker] "
+                "Missing the following settings: %s" % ', '.join(missing))
+            sys.stderr.write('\n') 
+            sys.exit(1)
+        return LDAPSimpleBindChecker(**ldap_settings)
+
         
         

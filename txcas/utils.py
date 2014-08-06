@@ -1,4 +1,7 @@
 
+# Standard library
+import inspect
+
 # External modules.
 import treq
 
@@ -52,5 +55,18 @@ def unwrap_failures(err):
             errs.append(err)
     return errs
     
-        
+def get_missing_args(func, provided, exclude=None):
+    """
+    """
+    if exclude is None:
+        exclude = {}
+    argspec = inspect.getargspec(func)
+    defaults = argspec.defaults
+    defaults_count = len(defaults)
+    if defaults_count > 0:
+        required = argspec.args[:-defaults_count]
+    else:
+        required = argspec.args
+    missing = [arg for arg in required if not arg in provided and arg not in exclude]        
+    return missing
         
