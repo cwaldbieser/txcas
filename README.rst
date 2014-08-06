@@ -102,10 +102,9 @@ $HOME on UNIX-like systems).  The meanings of the sections are as follows:
       $ twistd -n cas --help-auth
 
     - realm: User realm used to return a CAS user
-        - DemoRealm (default): Creates a user based on the username and
-          makes up some attributes for demonstration purposes.
-        - LDAPRealm: Creates a user with attributes read from an LDAP
-          account.
+      For a full list of realms, execute::
+
+      $ twistd -n cas --help-realms
 
     - ticket_store: Storage for CAS tickets.
         - InMemoryTicketStore: Stores tickets in memory.
@@ -194,10 +193,10 @@ User Realm Plugins
 User realm plugins are responsible for turning an authenticated avatar ID into
 an object that implements txcas.inteface.ICASUSer.  This user object is used to 
 provide attributes to a service during a /serviceValidate or /proxyValidate call.
-Currently, user realm plugins should provide global instances that implement
-txcas.interface.ICASRealm.  I am thinking I may want to change this to use some kind
-of factory like credential checker plugins use in the future, so development here
-may require changes with newer versions.
+Realm plugins should provide global instances that implement
+txcas.interface.ICASRealmiFactory.  The factory should generate an object that
+implements the twisted...IRealm interface, similar to how credential checker 
+plugin architecture works.
 
 Ticket Store Plugins
 ^^^^^^^^^^^^^^^^^^^^
@@ -205,9 +204,9 @@ Ticket store plugins manage tickets that CAS uses.  They can be persistant like
 `txcas.couchdb_ticket_store.CouchDBTicketStore`, or they can be ephemeral like
 `txcas.in_memory_ticket_store.InMemoryTicketStore`.  They also send out notifications
 of ticket expirations.
-Implementation is similar to user realm plugins, with the same caveat that I am planning
-on moving to some kind of factory system instead of providing instances of the plugins
-directly.
+
+The ticket store plugin architecture needs an overhaul.  I plan to make them available
+via factories, similar to the credential checker and user realm plugin architectures.
 
 
 
