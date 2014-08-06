@@ -59,10 +59,10 @@ will be redirected to the CAS server to log in.  Use 'foo' and
 to the service.  You will see you are now logged in as 'foo'.
 
 The log being printed to the console will have printed out the
-/proxyValidate XML response, including so (ficticious) attributes
+/proxyValidate XML response, including some (ficticious) attributes
 that were added to the avatar by the DemoUserRealm.
 
-If you point your browser to service 2, your SSO session (provided by
+If you point your browser to service 2, your SSO session provided by
 the CAS ticket granting cookie (TGC) will have transparently allowed
 you to log into the second service without having to re-enter crdentials.
 
@@ -81,8 +81,8 @@ dependencies.  E.g. the LDAP-based plugins require ldaptor
 Configuration
 -------------
 The endpoint for the service (port, HTTP or HTTPS, cert files, SSL options, etc.) 
-are configured in :file:`cas.tac`.  
-The main configuration file is called :file:`cas.cfg` (:file:`.casrc` if located in your
+is configured in :file:`cas.tac`.  
+The main configuration file is called :file:`cas.cfg` (or :file:`.casrc` if located in your
 $HOME on UNIX-like systems).  The meanings of the sections are as follows:
 
 - CAS: General CAS options
@@ -141,4 +141,74 @@ The CouchDB database itself will need to be configured with the appropriate view
 You can set up the database views by running the :program:`setup_couchdb.py` program.
 You should create an empty database before running the script and have DB admin
 credentials.  The script will prompt you for the necessay information.
+
+Development
+-----------
+
+Developing Plugins
+==================
+
+Basic File Layout and Script Requirements
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Plugins can be developed for credential checkers, user realms, and ticket stores.
+Plugin intergration code should be located in $PROJECT/twisted/plugins in a 
+Python script file.  The script should create a variables in the global 
+namespace of the script which are *instances* of classes that implement the
+required interface for the plugin you are developing.  For example, a file
+called `$PROJECT/twisted/plugins/myspecialticketstore.py` might have something
+like:
+
+.. code-block:: python
+
+    from mywickedcoolticketstore import WicketCoolTicketStore
+    import txcas.settings
+
+    # Read settings from [WickedCoolTicketStore] section.
+    # ...
+
+    aplugin = WickedCoolTicketStore(**settings)
+
+For more details, see: https://twistedmatrix.com/documents/14.0.0/core/howto/tap.html#using-cred-with-your-tap
+
+Configuring Plugins
+^^^^^^^^^^^^^^^^^^^
+Consider loading plugin settings from a unique section of :file:`cas.cfg`.  The 
+LDAPSimpleBindChecker and LDAPRealm plugins take this approach, as the
+LDAP settings are typically the same for these components.  However, you
+*should* make an effort so that command line arguments override any config
+file arguments, when applicable.
+
+Credential Checker Plugins
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+Current plugin architecture for cred checkers is based on providing an 
+*instance* of a class that implements twisted.cred.strcred.ICheckerFactory.
+This works with Twisted's :program:`twistd` program and lets you specify
+an :option:`--auth` option directly on the command line.  :file:`cas.cfg`
+can also specify a `cred_checker` option that should essentially be the same
+as the command line argument.  Since this syntax can be somewhat clunky for
+complex plugins, I'd recommend that you set up a separate section in the
+config file to provide options.
+
+User Realm Plugins
+^^^^^^^^^^^^^^^^^^
+User realm plugins are responsible for turning an authenticated avatar ID into
+an object that implements txcas.inteface.ICASUSer.  This user object is used to 
+provide attributes to a service during a /serviceValidate or /proxyValidate call.
+Currently, user realm plugins should provide global instances that implement
+txcas.interface.ICASRealm.  I am thinking I may want to change this to use some kind
+of factory like credential checker plugins use in the future, so development here
+may require changes with newer versions.
+
+Ticket Store Plugins
+^^^^^^^^^^^^^^^^^^^^
+Ticket store plugins manage tickets that CAS uses.  They can be persistant like
+`txcas.couchdb_ticket_store.CouchDBTicketStore`, or they can be ephemeral like
+`txcas.in_memory_ticket_store.InMemoryTicketStore`.  They also send out notifications
+of ticket expirations.
+Implementation is similar to user realm plugins, with the same caveat that I am planning
+on moving to some kind of factory system instead of providing instances of the plugins
+directly.
+
+
+
 
