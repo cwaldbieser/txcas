@@ -19,6 +19,12 @@ edit the settings in :file:`cas.tac` then run it with::
 To run as a daemon (in the background even when you log out 
 of the shell), omit the `-n` option.
 
+You can also run the server and specify the endpoint options 
+from the command line::
+
+    $ twistd -n cas -p 9800
+
+
 Running the Server Plus Example Services
 ----------------------------------------
 The service comes with a ready-to-run demonstration using a basic

@@ -26,10 +26,10 @@ class WebClientContextFactory(ClientContextFactory):
 
 def request(method, url, headers=None, params=None, data=None, auth=None, timeout=None):
     p = urlparse.urlparse(url)
-    if p.scheme.lower() == 'https':
-        contextFactory = WebClientContextFactory()
-    else:
-        contextFactory = None
+    agent_args = [reactor]
+    contextFactory = WebClientContextFactory()
+    agent_args.append(contextFactory)
+        
     body = None
     if data is not None:
         body = FileBodyProducer(StringIO(data))
@@ -51,7 +51,7 @@ def request(method, url, headers=None, params=None, data=None, auth=None, timeou
             if not headers.hasHeader('Authorization'):
                 headers.addRawHeader('Authorization', auth)
 
-    agent = BrowserLikeRedirectAgent(Agent(reactor, contextFactory))
+    agent = BrowserLikeRedirectAgent(Agent(*agent_args))
     d = agent.request(
         method, 
         url,

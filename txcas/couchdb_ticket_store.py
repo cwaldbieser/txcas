@@ -42,7 +42,8 @@ class CouchDBTicketStore(object):
     pgt_lifespan = 60 * 60 * 2
     charset = string.ascii_letters + string.digits + '-'
     ticket_size = 256
-    poll_expired = 60 * 5
+    poll_expired = 60 * 1
+    _expired_margin = 60*2
 
 
     def __init__(self, couch_host, couch_port, couch_db,
@@ -68,10 +69,58 @@ class CouchDBTicketStore(object):
             self._scheme = 'https://'
         else:
             self._scheme = 'http://'
+            
+        reactor.callLater(self.poll_expired, self._clean_expired)
+        
         
     def debug(self, msg):
         if self._debug:
             log.msg(msg)
+            
+    @defer.inlineCallbacks
+    def _clean_expired(self):
+        """
+        Clean up any expired tickets.
+        """
+        try:
+            url = '''%(scheme)s%(host)s:%(port)s/%(db)s/_design/views/_view/get_by_expires''' % {
+                'scheme': self._scheme,
+                'host': self._couch_host,
+                'port': self._couch_port,
+                'db': self._couch_db}
+            url = url.encode('utf-8')
+            earliest = datetime.datetime.today() - datetime.timedelta(seconds=self._expired_margin)
+            params = {
+                    'descending': 'true',
+                    'startkey': json.dumps(earliest.strftime("%Y-%m-%dT%H:%M:%S")),
+                    }
+
+            self.debug("[DEBUG][CouchDB] _clean_expired(), url: %s" % url)
+            self.debug("[DEBUG][CouchDB] _clean_expired(), params: %s" % str(params))
+
+            reqlib = self.reqlib
+            response = yield reqlib.get(url, 
+                        params=params, 
+                        headers=Headers({'Accept': ['application/json']}),
+                        auth=(self._couch_user, self._couch_passwd))
+            response = yield http_status_filter(response, [(200,200)], CouchDBError)
+            doc = yield reqlib.json_content(response)
+            rows = doc[u'rows']
+            if len(rows) > 0:
+                del_docs = []
+                for row in rows:
+                    ticket_id = row[u'value']
+                    try:
+                        yield self._expireTicket(ticket_id)
+                    except CouchDBError as ex:
+                        log.msg("CouchDB error while attempting to delete expired tickets.")
+                        log.err(ex)
+        except Exception as ex:
+            log.err(ex)
+        #Reschedule
+        yield self.reactor.callLater(self.poll_expired, self._clean_expired)
+        defer.returnValue(None)
+        
 
     def _validService(self, service):
         def cb(result):
@@ -238,19 +287,19 @@ class CouchDBTicketStore(object):
         defer.returnValue(None)
 
     @defer.inlineCallbacks
-    def _expireTicket(self, val):
+    def _expireTicket(self, ticket):
         """
         This function should only be called when a ticket is expired via
         a timeout or indirectly (e.g. TGT expires so derived PGTs are expired).
         """
-        entry = yield self._fetch_ticket(val)
+        entry = yield self._fetch_ticket(ticket)
         if entry is not None:
             _id = entry['_id']
             _rev = entry['_rev']
             del entry[u'_id']
             del entry[u'_rev']
             yield self._delete_ticket(_id, _rev)
-            yield self._expire_callback(val, entry, False)
+            yield self._expire_callback(ticket, entry, False)
         defer.returnValue(None)
 
     @defer.inlineCallbacks

@@ -67,7 +67,10 @@ def run():
                 'views': {
                     "get_ticket": {
                         "map": "function(doc) {\n  emit(doc['ticket_id'], doc);\n}"
-                    }
+                    },
+                    "get_by_expires": {
+                        "map": """function(doc) {\n    emit(doc['expires'], doc['ticket_id']);\n}"""
+                    },
                 },
             }
         doc = json.dumps(doc)
