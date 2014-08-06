@@ -3,7 +3,7 @@
 import sys
 
 # Application modules
-from txcas.interface import IRealmFactory, ITicketStore
+from txcas.interface import IRealmFactory, ITicketStoreFactory
 from txcas.server import ServerApp
 import txcas.settings
 
@@ -43,7 +43,7 @@ class CASService(Service):
     Service for CAS server
     """
 
-    def __init__(self, endpoint_s, checkers=None, realm=None):
+    def __init__(self, endpoint_s, checkers=None, realm=None, ticket_store=None):
         """
         """
         self.port_s = endpoint_s
@@ -65,29 +65,26 @@ class CASService(Service):
                     'ticket_store': 'InMemoryTicketStore'}})
 
         # Choose plugin that implements ITicketStore.
-        ticket_store = txcas.settings.get_plugin(
-                scp.get('PLUGINS', 'ticket_store'), ITicketStore)
-        assert ticket_store is not None, "Ticket Store has not been configured!"
-        sys.stderr.write("[CONFIG] Ticket Store: %s\n" % ticket_store.__class__.__name__)
-        lt_lifespan = get_int_opt(scp, 'CAS', 'lt_lifespan')
-        st_lifespan = get_int_opt(scp, 'CAS', 'st_lifespan')
-        pt_lifespan = get_int_opt(scp, 'CAS', 'pt_lifespan')
-        pgt_lifespan = get_int_opt(scp, 'CAS', 'pgt_lifespan')
-        tgt_lifespan = get_int_opt(scp, 'CAS', 'tgt_lifespan')
-        ticket_size = get_int_opt(scp, 'CAS', 'ticket_size')
-        
-        ticket_store.lt_lifespan = lt_lifespan
-        sys.stderr.write("[CONFIG] Login Ticket Lifespan: %d seconds\n" % lt_lifespan)
-        ticket_store.st_lifespan = st_lifespan
-        sys.stderr.write("[CONFIG] Service Ticket Lifespan: %d seconds\n" % st_lifespan)
-        ticket_store.pt_lifespan = pt_lifespan
-        sys.stderr.write("[CONFIG] Proxy Ticket Lifespan: %d seconds\n" % pt_lifespan)
-        ticket_store.pgt_lifespan = pgt_lifespan
-        sys.stderr.write("[CONFIG] Proxy Granting Ticket Lifespan: %d seconds\n" % pgt_lifespan)
-        ticket_store.tgt_lifespan = tgt_lifespan
-        sys.stderr.write("[CONFIG] Ticket Granting Ticket Lifespan: %d seconds\n" % tgt_lifespan)
-        ticket_store.ticket_size = ticket_size
-        sys.stderr.write("[CONFIG] Ticket Identifier Size: %d characters\n" % ticket_size)
+
+        if ticket_store is None:
+            tag_args = scp.get('PLUGINS', 'ticket_store')
+            parts = tag_args.split(':')
+            tag = parts[0]
+            args = ':'.join(parts[1:])
+            factory = txcas.settings.get_plugin_factory(tag, ITicketStoreFactory)
+            if factory is None:
+                sys.stderr.write("[ERROR] Ticket store type '%s' is not available.\n" % tag)
+                sys.exit(1)
+            ticket_store = factory.generateTicketStore(args)
+
+        assert ticket_store is not None, "Ticket store has not been configured!"
+        sys.stderr.write("[CONFIG] Ticket store: %s\n" % ticket_store.__class__.__name__)
+        sys.stderr.write("[CONFIG] Login Ticket Lifespan: %d seconds\n" % ticket_store.lt_lifespan)
+        sys.stderr.write("[CONFIG] Service Ticket Lifespan: %d seconds\n" % ticket_store.st_lifespan)
+        sys.stderr.write("[CONFIG] Proxy Ticket Lifespan: %d seconds\n" % ticket_store.pt_lifespan)
+        sys.stderr.write("[CONFIG] Proxy Granting Ticket Lifespan: %d seconds\n" % ticket_store.pgt_lifespan)
+        sys.stderr.write("[CONFIG] Ticket Granting Ticket Lifespan: %d seconds\n" % ticket_store.tgt_lifespan)
+        sys.stderr.write("[CONFIG] Ticket Identifier Size: %d characters\n" % ticket_store.ticket_size)
 
    
         # Choose plugin(s) that implement ICredentialChecker 

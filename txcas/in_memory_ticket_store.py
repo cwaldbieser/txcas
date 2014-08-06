@@ -3,6 +3,7 @@
 import datetime
 import random
 import string
+import sys
 from textwrap import dedent
 import uuid
 from xml.sax.saxutils import escape as xml_escape
@@ -11,7 +12,8 @@ from xml.sax.saxutils import escape as xml_escape
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         NotSSOService
 import txcas.http
-from txcas.interface import ITicketStore
+from txcas.interface import ITicketStore, ITicketStoreFactory
+import txcas.settings
 
 # External modules
 import treq
@@ -19,6 +21,64 @@ from twisted.internet import defer, reactor
 from twisted.plugin import IPlugin
 from twisted.python import log
 from zope.interface import implements
+
+
+class InMemoryTicketStoreFactory(object):
+    implements(IPlugin, ITicketStoreFactory)
+
+    tag = "memory_ticket_store"
+
+    opt_help = dedent('''\
+            A ticket store that manages all CAS tickets in local
+            memory.  It is easy to configure and quick to retreive
+            and modify tickets.  It is constained to a single process,
+            however, so no high availability.  Also, any tickets in
+            the store when the CAS process is stopped are lost.
+            Valid options include:
+            
+            - lt_lifespan
+            - st_lifespan
+            - pt_lifespan
+            - tgt_lifespan
+            - pgt_lifespan
+            - ticket_size
+            ''')
+
+    opt_usage = '''A colon-separated key=value list.'''
+
+    def generateTicketStore(self, argstring=""):
+        """
+        """
+        scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
+        settings = txcas.settings.export_settings_to_dict(scp)
+        ts_settings = settings.get('CAS', {})    
+        if argstring.strip() != "":
+            argdict = dict((x.split('=') for x in argstring.split(':')))
+            ts_settings.update(argdict)
+        buf = ["[CONFIG][InMemoryTicketStore] Settings:"]
+        for k in sorted(ts_settings.keys()):
+            v = ts_settings[k]
+            buf.append(" - %s: %s" % (k, v))
+        sys.stderr.write('\n'.join(buf)) 
+        sys.stderr.write('\n') 
+        missing = txcas.utils.get_missing_args(
+                    InMemoryTicketStore.__init__, ts_settings, ['self'])
+        if len(missing) > 0:
+            sys.stderr.write(
+                "[ERROR][InMemoryTicketStore] "
+                "Missing the following settings: %s" % ', '.join(missing))
+            sys.stderr.write('\n') 
+            sys.exit(1)
+    
+        props = (
+                'lt_lifespan', 'st_lifespan', 'pt_lifespan',
+                'tgt_lifespan', 'pgt_lifespan', 'ticket_size')
+        ts_props = dict((prop, int(ts_settings[prop])) for prop in props if prop in ts_settings)
+        txcas.utils.filter_args(InMemoryTicketStore.__init__, ts_settings, ['self'])
+        obj = InMemoryTicketStore(**ts_settings)
+        for prop, value in ts_props.iteritems():
+            setattr(obj, prop, value)
+        return obj
 
 
 class InMemoryTicketStore(object):

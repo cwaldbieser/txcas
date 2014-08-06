@@ -3,7 +3,7 @@
 import sys
 
 # Application modules
-from txcas.interface import IRealmFactory
+from txcas.interface import IRealmFactory, ITicketStoreFactory
 from txcas.service import CASService
 import txcas.settings
 import txcas.utils
@@ -25,6 +25,7 @@ class Options(usage.Options, strcred.AuthOptionMixin):
     optFlags = [
             ["ssl", "s", "Use SSL"],
             ["help-realms", None, "List user realm plugins available."],
+            ["help-ticket-stores", None, "List user ticket store plugins available."],
         ]
 
     optParameters = [
@@ -33,6 +34,8 @@ class Options(usage.Options, strcred.AuthOptionMixin):
                         ["private-key", "k", None, "An x509 private key (PEM format)."],
                         ["realm", "r", None, "User realm plugin to use."],
                         ["help-realm", None, None, "Help for a specific realm plugin."],
+                        ["ticket-store", "t", None, "Ticket store plugin to use."],
+                        ["help-ticket-store", None, None, "Help for a specific ticket store plugin."],
                     ]
 
 
@@ -93,8 +96,39 @@ class MyServiceMaker(object):
                     sys.exit(1)
                 realm = factory.generateRealm(realm_argstr)
 
+        # Ticket Store
+        if 'help-ticket-stores' in options and options['help-ticket-stores']:    
+            sys.stdout.write("Available Ticket Store Plugins\n") 
+            factories = list(getPlugins(ITicketStoreFactory))
+            txcas.utils.format_plugin_help_list(factories, sys.stdout)
+            sys.exit(0) 
+
+        if 'help-ticket-store' in options and options['help-ticket-store'] is not None:
+            ts_tag = options['help-ticket-store']
+            factory = txcas.settings.get_plugin_factory(ts_tag, ITicketStoreFactory)
+            if factory is None:
+                sys.stderr.write("Unknown ticket store plugin '%s'.\n" % ts_tag)
+                sys.exit(1)
+            sys.stderr.write(factory.opt_help)
+            sys.stderr.write('\n')
+            sys.exit(0)
+
+        ticket_store = None
+        ts_arg = options.get('ticket-store', None)
+        if ts_arg is not None:
+            ts_parts = ts_arg.split(':')
+            assert len(parts) !=0, "--ticket-store option is malformed."
+            ts_tag = ts_parts[0]
+            ts_argstr = ':'.join(ts_parts[1:])
+            if ts_tag is not None:
+                factory = txcas.settings.get_plugin_factory(ts_tag, ITicketStoreFactory)
+                if factory is None:
+                    sys.stderr.write("Ticket store type '%s' is not available.\n" % ts_tag)
+                    sys.exit(1)
+                ticket_store = factory.generateTicketStore(ts_argstr)
+
         # Create the service.
-        return CASService(endpoint, checkers=checkers, realm=realm)
+        return CASService(endpoint, checkers=checkers, realm=realm, ticket_store=ticket_store)
 
 
 # Now construct an object which *provides* the relevant interfaces

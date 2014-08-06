@@ -7,7 +7,7 @@ from urllib import urlencode
 import sys
 
 #Application modules
-from txcas.interface import IRealmFactory, ITicketStore
+from txcas.interface import IRealmFactory, ITicketStoreFactory
 from txcas.server import escape_html
 import txcas.settings
 
@@ -462,12 +462,18 @@ if __name__ == "__main__":
                 'PLUGINS': {
                     'cred_checker': 'DemoChecker',
                     'realm': 'demo_realm',
-                    'ticket_store': 'InMemoryTicketStore'}})
+                    'ticket_store': 'memory_ticket_store'}})
 
         # Choose plugin that implements ITicketStore.
-        ticket_store = txcas.settings.get_plugin(
-                scp.get('PLUGINS', 'ticket_store'), ITicketStore)
-        assert ticket_store is not None, "Ticket Store has not been configured!"
+        tag_args = scp.get('PLUGINS', 'ticket_store')
+        parts = tag_args.split(':')
+        tag = parts[0]
+        args = ':'.join(parts[1:])
+        factory = txcas.settings.get_plugin_factory(tag, ITicketStoreFactory)
+        if factory is None:
+            sys.stderr.write("[ERROR] Ticket store type '%s' is not available.\n" % tag)
+            sys.exit(1)
+        ticket_store = factory.generateTicketStore(args)
 
         # Choose the plugin that implements IRealm.
         tag_args = scp.get('PLUGINS', 'realm')

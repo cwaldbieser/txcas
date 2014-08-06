@@ -4,6 +4,7 @@ import datetime
 import json
 import random
 import string
+import sys
 from textwrap import dedent
 import uuid
 from xml.sax.saxutils import escape as xml_escape
@@ -12,7 +13,8 @@ from xml.sax.saxutils import escape as xml_escape
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         NotSSOService
 import txcas.http
-from txcas.interface import ITicketStore
+from txcas.interface import ITicketStore, ITicketStoreFactory
+import txcas.settings
 from txcas.utils import http_status_filter
 
 # External modules
@@ -27,6 +29,94 @@ from zope.interface import implements
 
 class CouchDBError(Exception):
     pass
+
+class CouchDBTicketStoreFactory(object):
+    """
+    """
+    implements(IPlugin, ITicketStoreFactory)
+
+    tag = "couchdb_ticket_store"
+
+    opt_help = dedent('''\
+            A ticket store that manages all CAS tickets an external
+            CouchDB database.  
+            Any tickets in the store when the CAS process is stopped 
+            are retained when it is restarted.
+            Valid options include:
+           
+            - couch_host
+            - couch port
+            - couch_db 
+            - couch_user
+            - couch_passwd
+            - use_https
+            - verify_cert 
+            - lt_lifespan
+            - st_lifespan
+            - pt_lifespan
+            - tgt_lifespan
+            - pgt_lifespan
+            - ticket_size
+            ''')
+
+    opt_usage = '''A colon-separated key=value list.'''
+
+    def generateTicketStore(self, argstring=""):
+        """
+        """
+        scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
+        settings = txcas.settings.export_settings_to_dict(scp)
+        ts_props = settings.get('CAS', {})
+        ts_settings = settings.get('CouchDB', {})
+        settings_xlate = {
+                'host': 'couch_host',
+                'port': 'couch_port',
+                'db': 'couch_db',
+                'user': 'couch_user',
+                'passwd': 'couch_passwd',
+                'https': 'use_https',
+            }
+        temp = {}
+        for k, v in ts_settings.iteritems():
+            k = settings_xlate.get(k, k)
+            temp[k] = v
+        ts_settings = temp
+        del temp
+        if argstring.strip() != "":
+            argdict = dict((x.split('=') for x in argstring.split(':')))
+            ts_settings.update(argdict)
+        buf = ["[CONFIG][CouchDBTicketStore] Settings:"]
+        for k in sorted(ts_settings.keys()):
+            v = ts_settings[k]
+            if k == 'couch_passwd':
+                v = '*******'
+            buf.append(" - %s: %s" % (k, v))
+        sys.stderr.write('\n'.join(buf))
+        sys.stderr.write('\n')
+        missing = txcas.utils.get_missing_args(
+                    CouchDBTicketStore.__init__, ts_settings, ['self'])
+        if len(missing) > 0:
+            sys.stderr.write(
+                "[ERROR][CouchDBTicketStore] "
+                "Missing the following settings: %s" % ', '.join(missing))
+            sys.stderr.write('\n')
+            sys.exit(1)
+
+        props = (
+                'lt_lifespan', 'st_lifespan', 'pt_lifespan', 
+                'tgt_lifespan', 'pgt_lifespan', 'ticket_size')
+        ts_props = dict((prop, int(ts_props[prop])) for prop in props if prop in ts_props)
+        txcas.utils.filter_args(CouchDBTicketStore.__init__, ts_settings, ['self'])
+        if 'couch_port' in ts_settings:
+            ts_settings['couch_port'] = int(ts_settings['couch_port'])
+        if 'use_https' in ts_settings:
+            ts_settings['use_https'] = bool(int(ts_settings['use_https']))
+        if 'verify_cert' in ts_settings:
+            ts_settings['verify_cert'] = bool(int(ts_settings['verify_cert']))
+        obj = CouchDBTicketStore(**ts_settings)
+        for prop, value in ts_props.iteritems():
+            setattr(obj, prop, value)
+        return obj
 
 
 class CouchDBTicketStore(object):
@@ -50,6 +140,7 @@ class CouchDBTicketStore(object):
                 couch_user, couch_passwd, use_https=True,
                 reactor=reactor, valid_service=None, 
                 is_sso_service=None, _debug=False, verify_cert=True):
+
         self.reactor = reactor
         self.valid_service = valid_service or (lambda x:True)
         self.is_sso_service = is_sso_service or (lambda x: True)

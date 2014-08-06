@@ -11,10 +11,10 @@ ticket_size = 256
 [PLUGINS]
 cred_checker = ldap_simple_bind
 realm = ldap_realm
-ticket_store = CouchDBTicketStore
+ticket_store = couchdb_ticket_store
 
 [InMemoryTicketStore]
-verify_cert = True
+verify_cert = 0
 
 [LDAP]
 host = 127.0.0.1

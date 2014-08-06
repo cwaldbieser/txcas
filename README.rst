@@ -107,8 +107,9 @@ $HOME on UNIX-like systems).  The meanings of the sections are as follows:
       $ twistd -n cas --help-realms
 
     - ticket_store: Storage for CAS tickets.
-        - InMemoryTicketStore: Stores tickets in memory.
-        - CouchDBTicketStore: Stores tickets in CouchDB
+      For a full list of ticket stores, execute::
+
+      $ twistd -n cas --help-ticket-stores
 
 LDAP Configuration
 ==================
@@ -194,7 +195,7 @@ User realm plugins are responsible for turning an authenticated avatar ID into
 an object that implements txcas.inteface.ICASUSer.  This user object is used to 
 provide attributes to a service during a /serviceValidate or /proxyValidate call.
 Realm plugins should provide global instances that implement
-txcas.interface.ICASRealmiFactory.  The factory should generate an object that
+txcas.interface.ICASRealmFactory.  The factory should generate an object that
 implements the twisted...IRealm interface, similar to how credential checker 
 plugin architecture works.
 
@@ -205,8 +206,10 @@ Ticket store plugins manage tickets that CAS uses.  They can be persistant like
 `txcas.in_memory_ticket_store.InMemoryTicketStore`.  They also send out notifications
 of ticket expirations.
 
-The ticket store plugin architecture needs an overhaul.  I plan to make them available
-via factories, similar to the credential checker and user realm plugin architectures.
+Ticket store plugins should provide global instances that implement
+txcas.interface.ITicketStoreFactory.  The factory should generate an object that
+implements the txcas.interface.ITicketStore interface, similar to how credential checker 
+plugin architecture works.
 
 
 
