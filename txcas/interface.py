@@ -1,3 +1,6 @@
+
+# External modules
+from twisted.cred.portal import IRealm
 from zope.interface import Interface, Attribute
 
 
@@ -6,6 +9,27 @@ class ICASUser(Interface):
     username = Attribute('String username')
     attribs = Attribute('List of (attribute, value) tuples.')
 
+class IRealmFactory(Interface):
+
+    tag = Attribute('String used to identify the plugin factory.')
+    opt_help = Attribute('String description of the plugin.')
+    opt_usage = Attribute('String describes how to provide arguments for factory.')
+
+    def generateRealm(argstring=""):
+        """
+        Create an object that implements IRealm.
+        """
+
+class ITicketStoreFactory(Interface):
+
+    tag = Attribute('String used to identify the plugin factory.')
+    opt_help = Attribute('String description of the plugin.')
+    opt_usage = Attribute('String describes how to provide arguments for factory.')
+
+    def generateTicketStore(argstring=""):
+        """
+        Create an object that implements ITicketStore.
+        """
 
 class ITicketStore(Interface):
     

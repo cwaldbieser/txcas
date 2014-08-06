@@ -59,7 +59,7 @@ def get_missing_args(func, provided, exclude=None):
     """
     """
     if exclude is None:
-        exclude = {}
+        exclude = set([])
     argspec = inspect.getargspec(func)
     defaults = argspec.defaults
     defaults_count = len(defaults)
@@ -69,4 +69,34 @@ def get_missing_args(func, provided, exclude=None):
         required = argspec.args
     missing = [arg for arg in required if not arg in provided and arg not in exclude]        
     return missing
-        
+
+def filter_args(func, provided, exclude=None):
+    """
+    Removes keys from mapping `provided` that are not included in the
+    arglist for `func`.
+    """
+    if exclude is None:
+        exclude = set([])
+    arg_set = set([x for x in inspect.getargspec(func).args if x not in exclude])
+    keys = provided.keys()
+    for k in keys:
+        if not k in arg_set:
+            del provided[k]
+
+def format_plugin_help_list(factories, stm):
+     """
+     Show plugin list with brief usage..
+     """
+     # Figure out the right width for our columns
+     firstLength = 0
+     for factory in factories:
+         if len(factory.tag) > firstLength:
+             firstLength = len(factory.tag)
+     formatString = '  %%-%is\t%%s\n' % firstLength
+     stm.write(formatString % ('Plugin', 'ArgString format'))
+     stm.write(formatString % ('======', '================'))
+     for factory in factories:
+         stm.write(
+             formatString % (factory.tag, factory.opt_usage))
+     stm.write('\n')
+

@@ -10,7 +10,7 @@ ticket_size = 256
 
 [PLUGINS]
 cred_checker = ldap_simple_bind
-realm = LDAPRealm
+realm = ldap_realm
 ticket_store = CouchDBTicketStore
 
 [InMemoryTicketStore]

@@ -7,13 +7,12 @@ from urllib import urlencode
 import sys
 
 #Application modules
-from txcas.interface import ITicketStore
+from txcas.interface import IRealmFactory, ITicketStore
 from txcas.server import escape_html
 import txcas.settings
 
 # External modules
 from klein import Klein
-from twisted.cred.portal import IRealm
 from twisted.web import microdom
 from twisted.web.client import getPage
 
@@ -462,7 +461,7 @@ if __name__ == "__main__":
         scp = txcas.settings.load_settings('cas', syspath='/etc/cas', defaults={
                 'PLUGINS': {
                     'cred_checker': 'DemoChecker',
-                    'realm': 'DemoRealm',
+                    'realm': 'demo_realm',
                     'ticket_store': 'InMemoryTicketStore'}})
 
         # Choose plugin that implements ITicketStore.
@@ -471,8 +470,15 @@ if __name__ == "__main__":
         assert ticket_store is not None, "Ticket Store has not been configured!"
 
         # Choose the plugin that implements IRealm.
-        realm = txcas.settings.get_plugin(
-                scp.get('PLUGINS', 'realm'), IRealm)
+        tag_args = scp.get('PLUGINS', 'realm')
+        parts = tag_args.split(':')
+        tag = parts[0]
+        args = ':'.join(parts[1:])
+        factory = txcas.settings.get_plugin_factory(tag, IRealmFactory)
+        if factory is None:
+            sys.stderr.write("[ERROR] Realm type '%s' is not available.\n" % tag)
+            sys.exit(1)
+        realm = factory.generateRealm(args)
         assert realm is not None, "User Realm has not been configured!"
 
         # Choose plugin(s) that implement ICredentialChecker 

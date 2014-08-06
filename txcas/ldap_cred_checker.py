@@ -182,6 +182,8 @@ class LDAPSimpleBindCheckerFactory(object):
                 "Missing the following settings: %s" % ', '.join(missing))
             sys.stderr.write('\n') 
             sys.exit(1)
+
+        txcas.utils.filter_args(LDAPSimpleBindChecker.__init__, ldap_settings, ['self'])
         return LDAPSimpleBindChecker(**ldap_settings)
 
         

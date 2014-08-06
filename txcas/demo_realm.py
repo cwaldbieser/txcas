@@ -1,6 +1,9 @@
 
+# Standard library
+from textwrap import dedent
+
 # Application module
-from txcas.interface import ICASUser
+from txcas.interface import ICASUser, IRealmFactory
 
 # External module
 from twisted.cred.portal import IRealm
@@ -22,11 +25,29 @@ class User(object):
     def logout(self):
         pass 
 
+class DemoRealmFactory(object):
+    """
+    """
+    implements(IPlugin, IRealmFactory)
+
+    tag = "demo_realm"
+
+    opt_help = dedent('''\
+            A demonstration realm that creates an avatar from an ID with phony
+            `email` and `domain` attributes.
+            ''')
+
+    opt_usage = '''This type of realm has no options.'''
+
+    def generateRealm(self, argstring=""):
+        """
+        """
+        return DemoRealm() 
 
 class DemoRealm(object):
 
 
-    implements(IPlugin, IRealm)
+    implements(IRealm)
 
     def requestAvatar(self, avatarId, mind, *interfaces):
         """

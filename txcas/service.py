@@ -3,7 +3,7 @@
 import sys
 
 # Application modules
-from txcas.interface import ITicketStore
+from txcas.interface import IRealmFactory, ITicketStore
 from txcas.server import ServerApp
 import txcas.settings
 
@@ -28,14 +28,14 @@ def get_int_opt(scp, section, option):
     try:
         return scp.getint(section, option)
     except ValueError:
-        print("Configuration [%s] %s must be an integer.")
+        sys.stderr.write("Configuration [%s] %s must be an integer.\n")
         sys.exit(1)
         
 def get_bool_opt(scp, section, option):
     try:
         return scp.getboolean(section, option)
     except ValueError:
-        print("Configuration [%s] %s must be a boolean value (e.g. 1, 0).")
+        sys.stderr.write("Configuration [%s] %s must be a boolean value (e.g. 1, 0).\n")
         sys.exit(1)
 
 class CASService(Service):
@@ -43,7 +43,7 @@ class CASService(Service):
     Service for CAS server
     """
 
-    def __init__(self, endpoint_s, checkers=None):
+    def __init__(self, endpoint_s, checkers=None, realm=None):
         """
         """
         self.port_s = endpoint_s
@@ -60,15 +60,15 @@ class CASService(Service):
                     'ticket_size': 256,
                 },
                 'PLUGINS': {
-                    'cred_checker': 'DemoChecker',
-                    'realm': 'DemoRealm',
+                    'cred_checker': 'demo_checker',
+                    'realm': 'demo_realm',
                     'ticket_store': 'InMemoryTicketStore'}})
 
         # Choose plugin that implements ITicketStore.
         ticket_store = txcas.settings.get_plugin(
                 scp.get('PLUGINS', 'ticket_store'), ITicketStore)
         assert ticket_store is not None, "Ticket Store has not been configured!"
-        print("[CONFIG] Ticket Store: %s" % ticket_store.__class__.__name__)
+        sys.stderr.write("[CONFIG] Ticket Store: %s\n" % ticket_store.__class__.__name__)
         lt_lifespan = get_int_opt(scp, 'CAS', 'lt_lifespan')
         st_lifespan = get_int_opt(scp, 'CAS', 'st_lifespan')
         pt_lifespan = get_int_opt(scp, 'CAS', 'pt_lifespan')
@@ -77,17 +77,17 @@ class CASService(Service):
         ticket_size = get_int_opt(scp, 'CAS', 'ticket_size')
         
         ticket_store.lt_lifespan = lt_lifespan
-        print("[CONFIG] Login Ticket Lifespan: %d seconds" % lt_lifespan)
+        sys.stderr.write("[CONFIG] Login Ticket Lifespan: %d seconds\n" % lt_lifespan)
         ticket_store.st_lifespan = st_lifespan
-        print("[CONFIG] Service Ticket Lifespan: %d seconds" % st_lifespan)
+        sys.stderr.write("[CONFIG] Service Ticket Lifespan: %d seconds\n" % st_lifespan)
         ticket_store.pt_lifespan = pt_lifespan
-        print("[CONFIG] Proxy Ticket Lifespan: %d seconds" % pt_lifespan)
+        sys.stderr.write("[CONFIG] Proxy Ticket Lifespan: %d seconds\n" % pt_lifespan)
         ticket_store.pgt_lifespan = pgt_lifespan
-        print("[CONFIG] Proxy Granting Ticket Lifespan: %d seconds" % pgt_lifespan)
+        sys.stderr.write("[CONFIG] Proxy Granting Ticket Lifespan: %d seconds\n" % pgt_lifespan)
         ticket_store.tgt_lifespan = tgt_lifespan
-        print("[CONFIG] Ticket Granting Ticket Lifespan: %d seconds" % tgt_lifespan)
+        sys.stderr.write("[CONFIG] Ticket Granting Ticket Lifespan: %d seconds\n" % tgt_lifespan)
         ticket_store.ticket_size = ticket_size
-        print("[CONFIG] Ticket Identifier Size: %d characters" % ticket_size)
+        sys.stderr.write("[CONFIG] Ticket Identifier Size: %d characters\n" % ticket_size)
 
    
         # Choose plugin(s) that implement ICredentialChecker 
@@ -95,7 +95,7 @@ class CASService(Service):
             try:
                 tag_args =  scp.get('PLUGINS', 'cred_checker')
             except Exception:
-                print("[ERROR] No valid credential checker was configured.")
+                sys.stderr.write("[ERROR] No valid credential checker was configured.\n")
                 sys.exit(1)
             parts = tag_args.split(':')
             tag = parts[0]
@@ -109,13 +109,22 @@ class CASService(Service):
                 checkers=[f.generateChecker(args) for f in factories]
 
         for checker in checkers:
-            print("[CONFIG] Credential Checker: %s" % checker.__class__.__name__)
+            sys.stderr.write("[CONFIG] Credential Checker: %s\n" % checker.__class__.__name__)
 
         # Choose the plugin that implements IRealm.
-        realm = txcas.settings.get_plugin(
-                scp.get('PLUGINS', 'realm'), IRealm)
+        if realm is None:
+            tag_args = scp.get('PLUGINS', 'realm')
+            parts = tag_args.split(':')
+            tag = parts[0]
+            args = ':'.join(parts[1:])
+            factory = txcas.settings.get_plugin_factory(tag, IRealmFactory)
+            if factory is None:
+                sys.stderr.write("[ERROR] Realm type '%s' is not available.\n" % tag)
+                sys.exit(1)
+            realm = factory.generateRealm(args)
+
         assert realm is not None, "User Realm has not been configured!"
-        print("[CONFIG] User Realm: %s" % realm.__class__.__name__)
+        sys.stderr.write("[CONFIG] User Realm: %s\n" % realm.__class__.__name__)
        
         # Page views
         page_views = None

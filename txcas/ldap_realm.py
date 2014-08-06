@@ -1,6 +1,14 @@
 
+
+# Standard library
+from textwrap import dedent
+import sys
+
 # Application module
-from txcas.interface import ICASUser
+from txcas.interface import ICASUser, IRealmFactory
+
+# Application modules
+import txcas.settings
 
 # External module
 from ldaptor.protocols.ldap import ldapclient, ldapsyntax, ldapconnector
@@ -58,11 +66,69 @@ class User(object):
     def logout(self):
         pass 
 
+class LDAPRealmFactory(object):
+    """
+    """
+    implements(IPlugin, IRealmFactory)
+
+    tag = "ldap_realm"
+
+    opt_help = dedent('''\
+            Builds an avatar from a fetched LDAP entry.
+            LDAP attributes are translated into avatar
+            attributes.  Valid options include:
+            
+            - host
+            - port
+            - basedn
+            - binddn
+            - bindpw 
+            - query_template: default -> (uid=%(username)s)
+              The %(username)s part will be interpolated with the (escaped)
+              avatar ID.
+            - attribs: A comma-separated list of attributes.
+            ''')
+
+    opt_usage = '''A colon-separated key=value list.'''
+
+    def generateRealm(self, argstring=""):
+        """
+        """
+        scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
+        settings = txcas.settings.export_settings_to_dict(scp)
+        ldap_settings = settings.get('LDAP', {})    
+        if argstring.strip() != "":
+            argdict = dict((x.split('=') for x in argstring.split(':')))
+            ldap_settings.update(argdict)
+        buf = ["[CONFIG][LDAPRealm] Settings:"]
+        for k in sorted(ldap_settings.keys()):
+            if k != "bindpw":
+                v = ldap_settings[k]
+            else:
+                v = "*******"
+            buf.append(" - %s: %s" % (k, v))
+        sys.stderr.write('\n'.join(buf)) 
+        sys.stderr.write('\n') 
+        missing = txcas.utils.get_missing_args(
+                    LDAPRealm.__init__, ldap_settings, ['self'])
+        if len(missing) > 0:
+            sys.stderr.write(
+                "[ERROR][LDAPRealm] "
+                "Missing the following settings: %s" % ', '.join(missing))
+            sys.stderr.write('\n') 
+            sys.exit(1)
+        if 'attribs' in ldap_settings:
+            attribs = ldap_settings['attribs']
+            attribs = attribs.split(',')
+            ldap_settings['attribs'] = attribs
+
+        txcas.utils.filter_args(LDAPRealm.__init__, ldap_settings, ['self'])
+        return LDAPRealm(**ldap_settings) 
 
 class LDAPRealm(object):
 
 
-    implements(IPlugin, IRealm)
+    implements(IRealm)
     
     def __init__(self, host, port, basedn, binddn, bindpw, query_template='(uid=%(username)s)', attribs=None):
         if attribs is None:
