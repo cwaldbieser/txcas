@@ -249,7 +249,7 @@ class ServerApp(object):
         if renew != "":
             return self._presentLogin(request)
             
-        def service_err(err, request):
+        def service_err(err, service, request):
             err.trap(InvalidService)
             err.printTraceback(file=sys.stderr)
             request.setResponseCode(403)
@@ -258,7 +258,7 @@ class ServerApp(object):
 
         d = self._authenticateByCookie(request)
         d.addErrback(lambda _:self._presentLogin(request))
-        d.addErrback(service_err, request)
+        d.addErrback(service_err, service, request)
         return d.addErrback(self.page_views['error5xx'], request)
 
     def _authenticateByCookie(self, request):
@@ -313,11 +313,21 @@ class ServerApp(object):
             request.redirect(service)            
             request.finish()
             return
+       
+        def service_err(err, service, request):
+            err.trap(InvalidService)
+            err.printTraceback(file=sys.stderr)
+            request.setResponseCode(403)
+            return defer.maybeDeferred(
+                self.page_views['invalid_service'], service, request)
+ 
         return defer.maybeDeferred(
             expireTGT).addCallback(
             lambda x: service).addCallback(
             self.ticket_store.mkLoginTicket).addCallback(
-            self.page_views['login'], service, request)
+            self.page_views['login'], service, request).addErrback(
+            service_err, service, request).addErrback(
+            self.page_views['error5xx'], request)
             
 
     def _authenticated(self, avatar_id, primaryCredentials, service, request):

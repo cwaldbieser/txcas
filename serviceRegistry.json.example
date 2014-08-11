@@ -1,0 +1,29 @@
+[
+    {
+        "name": "Service A",
+        "scheme": "*",
+        "netloc": "127.0.0.1:9801",
+        "path": "/",
+        "child_paths": true,
+        "required_params": null,
+        "SSO": true
+    },
+    {
+        "name": "Service B",
+        "scheme": "*",
+        "netloc": "127.0.0.1:9802",
+        "path": "/",
+        "child_paths": true,
+        "required_params": null,
+        "SSO": true
+    },
+    {
+        "name": "Service D",
+        "scheme": "*",
+        "netloc": "127.0.0.1:9804",
+        "path": "/",
+        "child_paths": true,
+        "required_params": null,
+        "SSO": true
+    }
+]

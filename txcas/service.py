@@ -3,7 +3,8 @@
 import sys
 
 # Application modules
-from txcas.interface import IRealmFactory, ITicketStoreFactory
+from txcas.interface import IRealmFactory, IServiceManagerFactory, \
+                        ITicketStoreFactory
 from txcas.server import ServerApp
 import txcas.settings
 
@@ -17,12 +18,6 @@ from twisted.internet.endpoints import serverFromString
 from twisted.python import log
 from twisted.web.server import Site
 
-
-def _valid_service(url):
-    """
-    Authorize anything
-    """
-    return True
 
 def get_int_opt(scp, section, option):
     try:
@@ -43,7 +38,13 @@ class CASService(Service):
     Service for CAS server
     """
 
-    def __init__(self, endpoint_s, checkers=None, realm=None, ticket_store=None):
+    def __init__(
+                self,   
+                endpoint_s, 
+                checkers=None, 
+                realm=None, 
+                ticket_store=None,
+                service_manager=None):
         """
         """
         self.port_s = endpoint_s
@@ -64,8 +65,22 @@ class CASService(Service):
                     'realm': 'demo_realm',
                     'ticket_store': 'InMemoryTicketStore'}})
 
-        # Choose plugin that implements ITicketStore.
+        # Choose plugin that implements IServiceManager.
+        if service_manager is None and scp.has_option('PLUGINS', 'service_manager'):
+            tag_args = scp.get('PLUGINS', 'service_manager')
+            parts = tag_args.split(':')
+            tag = parts[0]
+            args = ':'.join(parts[1:])
+            factory = txcas.settings.get_plugin_factory(tag, IServiceManagerFactory)
+            if factory is None:
+                sys.stderr.write("[ERROR] Service manager type '%s' is not available.\n" % tag)
+                sys.exit(1)
+            service_manager = factory.generateServiceManager(args)
 
+        if service_manager is not None:
+            sys.stderr.write("[CONFIG] Service manager: %s\n" % service_manager.__class__.__name__)
+
+        # Choose plugin that implements ITicketStore.
         if ticket_store is None:
             tag_args = scp.get('PLUGINS', 'ticket_store')
             parts = tag_args.split(':')
@@ -78,6 +93,7 @@ class CASService(Service):
             ticket_store = factory.generateTicketStore(args)
 
         assert ticket_store is not None, "Ticket store has not been configured!"
+        
         sys.stderr.write("[CONFIG] Ticket store: %s\n" % ticket_store.__class__.__name__)
         sys.stderr.write("[CONFIG] Login Ticket Lifespan: %d seconds\n" % ticket_store.lt_lifespan)
         sys.stderr.write("[CONFIG] Service Ticket Lifespan: %d seconds\n" % ticket_store.st_lifespan)
@@ -86,6 +102,9 @@ class CASService(Service):
         sys.stderr.write("[CONFIG] Ticket Granting Ticket Lifespan: %d seconds\n" % ticket_store.tgt_lifespan)
         sys.stderr.write("[CONFIG] Ticket Identifier Size: %d characters\n" % ticket_store.ticket_size)
 
+        # Attach service manager to ticket store.
+        if service_manager is not None:
+            ticket_store.service_manager = service_manager
    
         # Choose plugin(s) that implement ICredentialChecker 
         if checkers is None:        
@@ -134,13 +153,19 @@ class CASService(Service):
             requireSSL = True
         else:
             requireSSL = False
-       
+      
+        # Service validation func.
+        if service_manager is None:
+            validService = lambda x:True
+        else:
+            validService = service_manager.isValidService
+ 
         # Create the application. 
         app = ServerApp(
                     ticket_store, 
                     realm, 
                     checkers,
-                    validService=_valid_service, 
+                    validService=validService, 
                     requireSSL=requireSSL,
                     page_views=page_views, 
                     validate_pgturl=validate_pgturl)

@@ -133,17 +133,15 @@ class CouchDBTicketStore(object):
     charset = string.ascii_letters + string.digits + '-'
     ticket_size = 256
     poll_expired = 60 * 1
+    service_manager = None
     _expired_margin = 60*2
 
 
     def __init__(self, couch_host, couch_port, couch_db,
                 couch_user, couch_passwd, use_https=True,
-                reactor=reactor, valid_service=None, 
-                is_sso_service=None, _debug=False, verify_cert=True):
+                reactor=reactor, _debug=False, verify_cert=True):
 
         self.reactor = reactor
-        self.valid_service = valid_service or (lambda x:True)
-        self.is_sso_service = is_sso_service or (lambda x: True)
         self._debug = _debug
         self._expire_callback = (lambda ticket, data, explicit: None)
         self._couch_host = couch_host
@@ -162,8 +160,21 @@ class CouchDBTicketStore(object):
             self._scheme = 'http://'
             
         reactor.callLater(self.poll_expired, self._clean_expired)
-        
-        
+       
+    def _getServiceValidator(self):
+        service_mgr = self.service_manager
+        if service_mgr is None:
+            return (lambda x: True)
+        else:
+            return service_mgr.isValidService
+
+    def _getServiceSSOPredicate(self):
+        service_mgr = self.service_manager
+        if service_mgr is None:
+            return (lambda x: True)
+        else:
+            return service_mgr.isSSOService
+ 
     def debug(self, msg):
         if self._debug:
             log.msg(msg)
@@ -218,13 +229,13 @@ class CouchDBTicketStore(object):
             if not result:
                 raise InvalidService(service)
             return service
-        return defer.maybeDeferred(self.valid_service, service).addCallback(cb)
+        return defer.maybeDeferred(self._getServiceValidator(), service).addCallback(cb)
 
     def _isSSOService(self, service):
         def cb(result):
             if not result:
                 raise NotSSOService(service)
-        return defer.maybeDeferred(self.is_sso_service, service).addCallback(cb)
+        return defer.maybeDeferred(self._getServiceSSOPredicate(), service).addCallback(cb)
 
     def _generate(self, prefix):
         r = prefix

@@ -61,7 +61,7 @@ def get_missing_args(func, provided, exclude=None):
     if exclude is None:
         exclude = set([])
     argspec = inspect.getargspec(func)
-    defaults = argspec.defaults
+    defaults = argspec.defaults or []
     defaults_count = len(defaults)
     if defaults_count > 0:
         required = argspec.args[:-defaults_count]

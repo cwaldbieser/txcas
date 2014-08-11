@@ -94,15 +94,13 @@ class InMemoryTicketStore(object):
     pgt_lifespan = 60 * 60 * 2
     ticket_size = 256
     charset = string.ascii_letters + string.digits + '-'
+    
+    service_manager = None
 
-
-    def __init__(self, reactor=reactor, valid_service=None, 
-                    is_sso_service=None, verify_cert=True, _debug=False):
+    def __init__(self, reactor=reactor, verify_cert=True, _debug=False):
         self.reactor = reactor
         self._tickets = {}
         self._delays = {}
-        self.valid_service = valid_service or (lambda x:True)
-        self.is_sso_service = is_sso_service or (lambda x: True)
         self._debug = _debug
         self._expire_callback = (lambda ticket, data, explicit: None)
         if verify_cert:
@@ -110,6 +108,20 @@ class InMemoryTicketStore(object):
         else:
             self.reqlib = txcas.http
 
+    def _getServiceValidator(self):
+        service_mgr = self.service_manager
+        if service_mgr is None:
+            return (lambda x: True)
+        else:
+            return service_mgr.isValidService
+
+    def _getServiceSSOPredicate(self):
+        service_mgr = self.service_manager
+        if service_mgr is None:
+            return (lambda x: True)
+        else:
+            return service_mgr.isSSOService
+        
     def debug(self, msg):
         if self._debug:
             log.msg(msg)
@@ -119,13 +131,14 @@ class InMemoryTicketStore(object):
             if not result:
                 raise InvalidService(service)
             return service
-        return defer.maybeDeferred(self.valid_service, service).addCallback(cb)
+        
+        return defer.maybeDeferred(self._getServiceValidator(), service).addCallback(cb)
 
     def _isSSOService(self, service):
         def cb(result):
             if not result:
                 raise NotSSOService(service)
-        return defer.maybeDeferred(self.is_sso_service, service).addCallback(cb)
+        return defer.maybeDeferred(self._getServiceSSOPredicate(), service).addCallback(cb)
 
     def _generate(self, prefix):
         r = list(prefix)

@@ -7,7 +7,8 @@ from urllib import urlencode
 import sys
 
 #Application modules
-from txcas.interface import IRealmFactory, ITicketStoreFactory
+from txcas.interface import IRealmFactory, IServiceManagerFactory, \
+                        ITicketStoreFactory
 from txcas.server import escape_html
 import txcas.settings
 
@@ -464,6 +465,17 @@ if __name__ == "__main__":
                     'realm': 'demo_realm',
                     'ticket_store': 'memory_ticket_store'}})
 
+        # Choose plugin that implements IServiceManager.
+        tag_args = scp.get('PLUGINS', 'service_manager')
+        parts = tag_args.split(':')
+        tag = parts[0]
+        args = ':'.join(parts[1:])
+        factory = txcas.settings.get_plugin_factory(tag, IiServiceManagerFactory)
+        if factory is None:
+            sys.stderr.write("[ERROR] Service manager type '%s' is not available.\n" % tag)
+            sys.exit(1)
+        service_maanger = factory.generateServiceManager(args)
+
         # Choose plugin that implements ITicketStore.
         tag_args = scp.get('PLUGINS', 'ticket_store')
         parts = tag_args.split(':')
@@ -474,6 +486,9 @@ if __name__ == "__main__":
             sys.stderr.write("[ERROR] Ticket store type '%s' is not available.\n" % tag)
             sys.exit(1)
         ticket_store = factory.generateTicketStore(args)
+        
+        if service_manager is not None:
+            ticket_store.service_manager = service_manager
 
         # Choose the plugin that implements IRealm.
         tag_args = scp.get('PLUGINS', 'realm')
@@ -504,8 +519,14 @@ if __name__ == "__main__":
         else:
             checkers=[f.generateChecker(args) for f in factories]
 
+        # Service validation func.
+        if service_manager is None:
+            validService = lambda x:True
+        else:
+            validService = service_manager.isValidService
+
         #Create the CAS server app.
-        server_app = ServerApp(ticket_store, realm, checkers, lambda x:True,
+        server_app = ServerApp(ticket_store, realm, checkers, validService,
                                requireSSL=False, page_views=page_views, validate_pgturl=False)
 
 
