@@ -106,6 +106,12 @@ $HOME on UNIX-like systems).  The meanings of the sections are as follows:
 
       $ twistd -n cas --help-realms
 
+    - service_manager: Manage service information including whether a service is
+      valid and whether a service participates in SSO.
+      For a full list of realms, execute::
+
+      $ twistd -n cas --help-service-managers
+
     - ticket_store: Storage for CAS tickets.
       For a full list of ticket stores, execute::
 
@@ -198,6 +204,14 @@ Realm plugins should provide global instances that implement
 txcas.interface.ICASRealmFactory.  The factory should generate an object that
 implements the twisted...IRealm interface, similar to how credential checker 
 plugin architecture works.
+
+Service Manager Plugins
+^^^^^^^^^^^^^^^^^^^^^^^
+Service manager plugins are used to determine whether a service is valid.
+They also determine whether a service is able to participate in SSO or
+whether primary credentials must be presented.  This latter function is similar
+to the `renew` parameter of the CAS protocol, but it is enforced from the
+CAS server rather than from the service.
 
 Ticket Store Plugins
 ^^^^^^^^^^^^^^^^^^^^
