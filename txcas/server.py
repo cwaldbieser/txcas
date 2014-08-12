@@ -10,9 +10,11 @@ import urlparse
 from xml.sax.saxutils import escape as xml_escape
 
 #Application modules
+from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
+                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         CookieAuthFailed, NotSSOService, NotHTTPSError, \
-                        InvalidProxyCallback
+                        InvalidProxyCallback, ViewNotImplementedError
 import txcas.http
 from txcas.interface import ICASUser, ITicketStore
 from txcas.utils import http_status_filter
@@ -221,20 +223,56 @@ class ServerApp(object):
         self.validate_pgturl = validate_pgturl
 
         default_page_views = {
-                'login': self._renderLogin,
-                'login_success': self._renderLoginSuccess,
-                'logout': self._renderLogout,
-                'invalid_service': self._renderInvalidService,
-                'error5xx': self._renderError5xx,
+                VIEW_LOGIN: self._renderLogin,
+                VIEW_LOGIN_SUCCESS: self._renderLoginSuccess,
+                VIEW_LOGOUT: self._renderLogout,
+                VIEW_INVALID_SERVICE: self._renderInvalidService,
+                VIEW_ERROR_5XX: self._renderError5xx,
             }
+        self._default_page_views = default_page_views
         if page_views is None:
+            print "[DEBUG][CAS] page_views is None"
             page_views = default_page_views
         else:
-            default_page_views.update(page_views)
-            page_views = default_page_views
+            temp = dict(default_page_views)
+            temp.update(page_views)
+            page_views = temp
+            del temp
+        print "[DEBUG][CAS] page_views", page_views
         self.page_views = page_views
         
         self.ticket_store.register_ticket_expiration_callback(log_ticket_expiration)
+
+    def _get_page_view(self, symbol, *args):
+        """
+        """
+        def eb(err, symbol, *args):
+            err.trap(ViewNotImplementedError) 
+            log.err(err)            
+
+            return defer.maybeDeferred(self._default_page_views[symbol], *args)
+
+        d = defer.maybeDeferred(self.page_views[symbol], *args)
+        d.addErrback(eb, symbol, *args) 
+        return d
+
+    def _page_view_callback(self, _, symbol, *args):
+        """
+        """
+        d = self._get_page_view(symbol, *args)
+        return d
+
+    def _page_view_result_callback(self, result, symbol, *args):
+        """
+        """
+        d = self._get_page_view(symbol, result, *args)
+        return d
+
+    def _page_view_errback(self, err, symbol, *args):
+        """
+        """
+        d = self._get_page_view(symbol, err, *args) 
+        return d
 
     @app.route('/login', methods=['GET'])
     def login_GET(self, request):
@@ -253,13 +291,12 @@ class ServerApp(object):
             err.trap(InvalidService)
             err.printTraceback(file=sys.stderr)
             request.setResponseCode(403)
-            return defer.maybeDeferred(
-                self.page_views['invalid_service'], service, request)
+            return self._get_page_view(VIEW_INVALID_SERVICE, service, request)
 
         d = self._authenticateByCookie(request)
         d.addErrback(lambda _:self._presentLogin(request))
         d.addErrback(service_err, service, request)
-        return d.addErrback(self.page_views['error5xx'], request)
+        return d.addErrback(self._page_view_errback, VIEW_ERROR_5XX,  request)
 
     def _authenticateByCookie(self, request):
         tgc = request.getCookie(self.cookie_name)
@@ -318,16 +355,15 @@ class ServerApp(object):
             err.trap(InvalidService)
             err.printTraceback(file=sys.stderr)
             request.setResponseCode(403)
-            return defer.maybeDeferred(
-                self.page_views['invalid_service'], service, request)
+            return self._get_page_view(VIEW_INVALID_SERVICE, service, request)
  
         return defer.maybeDeferred(
             expireTGT).addCallback(
             lambda x: service).addCallback(
             self.ticket_store.mkLoginTicket).addCallback(
-            self.page_views['login'], service, request).addErrback(
+            self._page_view_result_callback, VIEW_LOGIN, service, request).addErrback(
             service_err, service, request).addErrback(
-            self.page_views['error5xx'], request)
+            self._page_view_errback, VIEW_ERROR_5XX, request)
             
 
     def _authenticated(self, avatar_id, primaryCredentials, service, request):
@@ -391,8 +427,8 @@ class ServerApp(object):
             d.addCallback(replace_result, avatar_id)
             d.addCallback(self.realm.requestAvatar, None, ICASUser)
             d.addCallback(extract_avatar)
-            d.addCallback(self.page_views['login_success'], request)
-        return d.addErrback(self.page_views['error5xx'], request)
+            d.addCallback(self._page_view_result_callback, VIEW_LOGIN_SUCCESS, request)
+        return d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
 
     def _renderLogin(self, ticket, service, request):
         html_parts = []
@@ -540,8 +576,7 @@ class ServerApp(object):
         def _validService(_, service):
             def eb(err):
                 err.trap(InvalidService)
-                return defer.maybeDeferred(
-                    self.page_views['invalid_service'], service, request)
+                return self._get_page_view(VIEW_INVALID_SERVICE, service, request)
             return defer.maybeDeferred(
                 self.validService, service).addErrback(eb)
                 
@@ -567,11 +602,10 @@ class ServerApp(object):
             d.addCallback(
                 _validService, service).addCallback(
                 redirect).addErrback(
-                self.page_views['error5xx'], request)
+                self._page_view_errback, VIEW_ERROR_5XX, request)
         else:
-            d.addCallback(
-                self.page_views['logout']).addErrback(
-                self.page_views['error5xx'], request)
+            d.addCallback(self._page_view_callback, VIEW_LOGOUT, request).addErrback(
+                self._page_view_errback, VIEW_ERROR_5XX, request)
 
         return d
 
@@ -628,7 +662,7 @@ class ServerApp(object):
 
         d.addCallback(renderUsername, ticket, service, request)
         d.addErrback(renderFailure, ticket, service, request)
-        d.addErrback(self.page_views['error5xx'], request)
+        d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
         return d        
 
     @app.route('/serviceValidate', methods=['GET'])
@@ -749,7 +783,7 @@ class ServerApp(object):
         d.addCallback(getAvatar)
         d.addCallback(renderSuccess, ticket, request)
         d.addErrback(renderFailure, ticket, request)
-        d.addErrback(self.page_views['error5xx'], request)
+        d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
         return d        
 
     def _validateProxyUrl(self, data, pgturl, service, ticket, request):

@@ -3,8 +3,10 @@
 import sys
 
 # Application modules
+from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
+                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX
 from txcas.interface import IRealmFactory, IServiceManagerFactory, \
-                        ITicketStoreFactory
+                        ITicketStoreFactory, IViewProviderFactory
 from txcas.server import ServerApp
 import txcas.settings
 
@@ -44,7 +46,8 @@ class CASService(Service):
                 checkers=None, 
                 realm=None, 
                 ticket_store=None,
-                service_manager=None):
+                service_manager=None,
+                view_provider=None):
         """
         """
         self.port_s = endpoint_s
@@ -64,6 +67,21 @@ class CASService(Service):
                     'cred_checker': 'demo_checker',
                     'realm': 'demo_realm',
                     'ticket_store': 'InMemoryTicketStore'}})
+
+        # Choose plugin that implements IViewProvider.
+        if view_provider is None and scp.has_option('PLUGINS', 'view_provider'):
+            tag_args = scp.get('PLUGINS', 'view_provider')
+            parts = tag_args.split(':')
+            tag = parts[0]
+            args = ':'.join(parts[1:])
+            factory = txcas.settings.get_plugin_factory(tag, IViewProviderFactory)
+            if factory is None:
+                sys.stderr.write("[ERROR] View provider type '%s' is not available.\n" % tag)
+                sys.exit(1)
+            view_provider = factory.generateViewProvider(args)
+
+        if view_provider is not None:
+            sys.stderr.write("[CONFIG] View provider: %s\n" % view_provider.__class__.__name__)
 
         # Choose plugin that implements IServiceManager.
         if service_manager is None and scp.has_option('PLUGINS', 'service_manager'):
@@ -144,6 +162,19 @@ class CASService(Service):
        
         # Page views
         page_views = None
+        if view_provider is not None:
+            page_views = {}
+            symbol_table = [
+                VIEW_LOGIN,
+                VIEW_LOGIN_SUCCESS,
+                VIEW_LOGOUT,
+                VIEW_INVALID_SERVICE,
+                VIEW_ERROR_5XX,
+                ]
+            for symbol in symbol_table:
+                func = view_provider.provideView(symbol)
+                if func is not None:
+                    page_views[symbol] = func
         
         # Validate PGT URL?
         validate_pgturl = get_bool_opt(scp, 'CAS', 'validate_pgturl')

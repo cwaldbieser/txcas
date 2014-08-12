@@ -4,7 +4,7 @@ import sys
 
 # Application modules
 from txcas.interface import IRealmFactory, IServiceManagerFactory, \
-                        ITicketStoreFactory
+                        ITicketStoreFactory, IViewProviderFactory
 from txcas.service import CASService
 import txcas.settings
 import txcas.utils
@@ -28,6 +28,7 @@ class Options(usage.Options, strcred.AuthOptionMixin):
             ["help-realms", None, "List user realm plugins available."],
             ["help-ticket-stores", None, "List ticket store plugins available."],
             ["help-service-managers", None, "List service manager plugins available."],
+            ["help-view-providers", None, "List view provider plugins available."],
         ]
 
     optParameters = [
@@ -40,6 +41,8 @@ class Options(usage.Options, strcred.AuthOptionMixin):
                         ["help-ticket-store", None, None, "Help for a specific ticket store plugin."],
                         ["service-manager", "s", None, "Service Manager plugin to use."],
                         ["help-service-manager", None, None, "Help for a specific service manager plugin."],
+                        ["view-provider", None, None, "View provider plugin to use."],
+                        ["help-view-provider", None, None, "Help for a specific view provider plugin."],
                     ]
 
 
@@ -99,6 +102,38 @@ class MyServiceMaker(object):
                     sys.stderr.write("Realm type '%s' is not available.\n" % realm_tag)
                     sys.exit(1)
                 realm = factory.generateRealm(realm_argstr)
+
+        # View Provider
+        if 'help-view-providers' in options and options['help-view-providers']:    
+            sys.stdout.write("Available View Provider Plugins\n") 
+            factories = list(getPlugins(IViewProviderFactory))
+            txcas.utils.format_plugin_help_list(factories, sys.stdout)
+            sys.exit(0) 
+
+        if 'help-view-provider' in options and options['help-view-provider'] is not None:
+            tag = options['help-view-provider']
+            factory = txcas.settings.get_plugin_factory(tag, IViewProviderFactory)
+            if factory is None:
+                sys.stderr.write("Unknown view provider plugin '%s'.\n" % tag)
+                sys.exit(1)
+            sys.stderr.write(factory.opt_help)
+            sys.stderr.write('\n')
+            sys.exit(0)
+
+        obj = None
+        arg = options.get('view-provider', None)
+        if arg is not None:
+            parts = arg.split(':')
+            assert len(parts) !=0, "--view-provider option is malformed."
+            tag = parts[0]
+            argstr = ':'.join(parts[1:])
+            if tag is not None:
+                factory = txcas.settings.get_plugin_factory(tag, IViewProviderFactory)
+                if factory is None:
+                    sys.stderr.write("View provider type '%s' is not available.\n" % tag)
+                    sys.exit(1)
+                obj = factory.generateViewProvider(argstr)
+        view_provider = obj
 
         # Service Manger
         if 'help-service-managers' in options and options['help-service-managers']:    
@@ -169,7 +204,8 @@ class MyServiceMaker(object):
                 checkers=checkers, 
                 realm=realm, 
                 ticket_store=ticket_store,
-                service_manager=service_manager)
+                service_manager=service_manager,
+                view_provider=view_provider)
 
 
 # Now construct an object which *provides* the relevant interfaces

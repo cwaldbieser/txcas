@@ -25,3 +25,6 @@ class NotSSOService(CASError):
 
 class NotHTTPSError(CASError):
     pass
+
+class ViewNotImplementedError(CASError):
+    pass

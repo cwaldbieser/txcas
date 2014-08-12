@@ -52,31 +52,15 @@ class IViewProviderFactory(Interface):
 
     def generateViewProvider(argstring=""):
         """
-        Create an object that implements txcas.IViewProvider
+        Create an object that provides one or more views.
         """
+
 class IViewProvider(Interface):
 
-    def renderLogin(loginTicket, service, request):
+    def provideView(view_type):
         """
-        Rendered when credentials are requested.
-        """
-    def renderLoginSuccess(avatar, request):
-        """
-        Rendered when no service is specified and a valid SSO session already exists.
-        """
-    def renderLogout(request):
-        """
-        Rendered on logout.
-        """
-
-    def renderInvalidService(service, request):
-        """
-        Rendered when an invalid service is provided.
-        """
-
-    def renderError5xx(err, request):
-        """
-        Rendered on an internal error.
+        Provide a function that will render the named view.
+        Return None if the view is not provided.
         """
 
 class ITicketStoreFactory(Interface):

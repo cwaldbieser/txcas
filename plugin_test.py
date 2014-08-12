@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 
-from txcas.interface import IRealmFactory, IServiceManagerFactory, ITicketStoreFactory 
+from txcas.interface import IRealmFactory, IServiceManagerFactory, \
+                            ITicketStoreFactory, IViewProviderFactory
 
 from twisted.plugin import getPlugins
 from twisted.cred.strcred import ICheckerFactory
@@ -26,6 +27,12 @@ for n, thing in enumerate(getPlugins(ICheckerFactory)):
 
 print "== IServiceManagerFactory test =="
 for n, thing in enumerate(getPlugins(IServiceManagerFactory)):
+    print "%02d %s" % (n, thing)
+    print thing.tag
+    print
+
+print "== IViewProviderFactory test =="
+for n, thing in enumerate(getPlugins(IViewProviderFactory)):
     print "%02d %s" % (n, thing)
     print thing.tag
     print

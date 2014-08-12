@@ -13,6 +13,9 @@ cred_checker = ldap_simple_bind
 realm = ldap_realm
 ticket_store = couchdb_ticket_store
 
+[JSONServiceManager]
+path = /path/to/serviceRegistry.json
+
 [InMemoryTicketStore]
 verify_cert = 0
 
