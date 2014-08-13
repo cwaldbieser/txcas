@@ -94,6 +94,7 @@ $HOME on UNIX-like systems).  The meanings of the sections are as follows:
     - pt_timeout: Proxy Ticket timeout
     - pgt_timeout: Proxy Granting Ticket timeout
     - tgt_timeout: Ticket Granting Ticket timeout
+    - static_dir: Path to folder from which static content is served.
 
 - PLUGINS: Defines what components to use.
     - cred_checker: Component to use for checking credentials.
