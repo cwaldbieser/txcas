@@ -460,7 +460,7 @@ class ServerApp(object):
         d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
         return d
 
-    def _renderLogin(self, ticket, service, request):
+    def _renderLogin(self, ticket, service, failed, request):
         html_parts = []
         html_parts.append(dedent('''\
         <html>

@@ -114,12 +114,6 @@ class CASService(Service):
         assert ticket_store is not None, "Ticket store has not been configured!"
         
         sys.stderr.write("[CONFIG] Ticket store: %s\n" % ticket_store.__class__.__name__)
-        sys.stderr.write("[CONFIG] Login Ticket Lifespan: %d seconds\n" % ticket_store.lt_lifespan)
-        sys.stderr.write("[CONFIG] Service Ticket Lifespan: %d seconds\n" % ticket_store.st_lifespan)
-        sys.stderr.write("[CONFIG] Proxy Ticket Lifespan: %d seconds\n" % ticket_store.pt_lifespan)
-        sys.stderr.write("[CONFIG] Proxy Granting Ticket Lifespan: %d seconds\n" % ticket_store.pgt_lifespan)
-        sys.stderr.write("[CONFIG] Ticket Granting Ticket Lifespan: %d seconds\n" % ticket_store.tgt_lifespan)
-        sys.stderr.write("[CONFIG] Ticket Identifier Size: %d characters\n" % ticket_store.ticket_size)
 
         # Attach service manager to ticket store.
         if service_manager is not None:

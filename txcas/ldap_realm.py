@@ -100,15 +100,6 @@ class LDAPRealmFactory(object):
         if argstring.strip() != "":
             argdict = dict((x.split('=') for x in argstring.split(':')))
             ldap_settings.update(argdict)
-        buf = ["[CONFIG][LDAPRealm] Settings:"]
-        for k in sorted(ldap_settings.keys()):
-            if k != "bindpw":
-                v = ldap_settings[k]
-            else:
-                v = "*******"
-            buf.append(" - %s: %s" % (k, v))
-        sys.stderr.write('\n'.join(buf)) 
-        sys.stderr.write('\n') 
         missing = txcas.utils.get_missing_args(
                     LDAPRealm.__init__, ldap_settings, ['self'])
         if len(missing) > 0:
@@ -123,6 +114,15 @@ class LDAPRealmFactory(object):
             ldap_settings['attribs'] = attribs
 
         txcas.utils.filter_args(LDAPRealm.__init__, ldap_settings, ['self'])
+        buf = ["[CONFIG][LDAPRealm] Settings:"]
+        for k in sorted(ldap_settings.keys()):
+            if k != "bindpw":
+                v = ldap_settings[k]
+            else:
+                v = "*******"
+            buf.append(" - %s: %s" % (k, v))
+        sys.stderr.write('\n'.join(buf)) 
+        sys.stderr.write('\n') 
         return LDAPRealm(**ldap_settings) 
 
 class LDAPRealm(object):

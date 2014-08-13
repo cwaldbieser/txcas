@@ -165,15 +165,6 @@ class LDAPSimpleBindCheckerFactory(object):
         if argstring.strip() != "":
             argdict = dict((x.split('=') for x in argstring.split(':')))
             ldap_settings.update(argdict)
-        buf = ["[CONFIG][LDAPSimpleBindChecker] Settings:"]
-        for k in sorted(ldap_settings.keys()):
-            if k != "bindpw":
-                v = ldap_settings[k]
-            else:
-                v = "*******"
-            buf.append(" - %s: %s" % (k, v))
-        sys.stderr.write('\n'.join(buf)) 
-        sys.stderr.write('\n') 
         missing = txcas.utils.get_missing_args(
                     LDAPSimpleBindChecker.__init__, ldap_settings, ['self'])
         if len(missing) > 0:
@@ -184,6 +175,15 @@ class LDAPSimpleBindCheckerFactory(object):
             sys.exit(1)
 
         txcas.utils.filter_args(LDAPSimpleBindChecker.__init__, ldap_settings, ['self'])
+        buf = ["[CONFIG][LDAPSimpleBindChecker] Settings:"]
+        for k in sorted(ldap_settings.keys()):
+            if k != "bindpw":
+                v = ldap_settings[k]
+            else:
+                v = "*******"
+            buf.append(" - %s: %s" % (k, v))
+        sys.stderr.write('\n'.join(buf)) 
+        sys.stderr.write('\n') 
         return LDAPSimpleBindChecker(**ldap_settings)
 
         

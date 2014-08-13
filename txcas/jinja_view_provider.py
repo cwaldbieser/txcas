@@ -48,12 +48,6 @@ class Jinja2ViewProviderFactory(object):
         if argstring.strip() != "":
             argdict = dict((x.split('=') for x in argstring.split(':')))
             config.update(argdict)
-        buf = ["[CONFIG][Jinja2ViewProvider] Settings:"]
-        for k in sorted(config.keys()):
-            v = config[k]
-            buf.append(" - %s: %s" % (k, v))
-        sys.stderr.write('\n'.join(buf))
-        sys.stderr.write('\n')
         missing = txcas.utils.get_missing_args(
                     Jinja2ViewProvider.__init__, config, ['self'])
         if len(missing) > 0:
@@ -64,6 +58,12 @@ class Jinja2ViewProviderFactory(object):
             sys.exit(1)
 
         txcas.utils.filter_args(Jinja2ViewProvider.__init__, config, ['self'])
+        buf = ["[CONFIG][Jinja2ViewProvider] Settings:"]
+        for k in sorted(config.keys()):
+            v = config[k]
+            buf.append(" - %s: %s" % (k, v))
+        sys.stderr.write('\n'.join(buf))
+        sys.stderr.write('\n')
         return Jinja2ViewProvider(**config)
 
 class Jinja2ViewProvider(object):

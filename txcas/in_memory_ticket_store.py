@@ -55,12 +55,6 @@ class InMemoryTicketStoreFactory(object):
         if argstring.strip() != "":
             argdict = dict((x.split('=') for x in argstring.split(':')))
             ts_settings.update(argdict)
-        buf = ["[CONFIG][InMemoryTicketStore] Settings:"]
-        for k in sorted(ts_settings.keys()):
-            v = ts_settings[k]
-            buf.append(" - %s: %s" % (k, v))
-        sys.stderr.write('\n'.join(buf)) 
-        sys.stderr.write('\n') 
         missing = txcas.utils.get_missing_args(
                     InMemoryTicketStore.__init__, ts_settings, ['self'])
         if len(missing) > 0:
@@ -78,6 +72,14 @@ class InMemoryTicketStoreFactory(object):
         obj = InMemoryTicketStore(**ts_settings)
         for prop, value in ts_props.iteritems():
             setattr(obj, prop, value)
+        buf = ["[CONFIG][InMemoryTicketStore] Settings:"]
+        d = dict(ts_settings)
+        d.update(ts_props)
+        for k in sorted(d.keys()):
+            v = d[k]
+            buf.append(" - %s: %s" % (k, v))
+        sys.stderr.write('\n'.join(buf)) 
+        sys.stderr.write('\n') 
         return obj
 
 

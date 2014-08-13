@@ -70,12 +70,6 @@ class JSONServiceManagerFactory(object):
         if argstring.strip() != "":
             argdict = dict((x.split('=') for x in argstring.split(':')))
             config.update(argdict)
-        buf = ["[CONFIG][JSONServiceManager] Settings:"]
-        for k in sorted(config.keys()):
-            v = config[k]
-            buf.append(" - %s: %s" % (k, v))
-        sys.stderr.write('\n'.join(buf))
-        sys.stderr.write('\n')
         missing = txcas.utils.get_missing_args(
                     JSONServiceManager.__init__, config, ['self'])
         if len(missing) > 0:
@@ -86,6 +80,12 @@ class JSONServiceManagerFactory(object):
             sys.exit(1)
 
         txcas.utils.filter_args(JSONServiceManager.__init__, config, ['self'])
+        buf = ["[CONFIG][JSONServiceManager] Settings:"]
+        for k in sorted(config.keys()):
+            v = config[k]
+            buf.append(" - %s: %s" % (k, v))
+        sys.stderr.write('\n'.join(buf))
+        sys.stderr.write('\n')
         return JSONServiceManager(config["path"])
 
 class JSONServiceManager(object):
