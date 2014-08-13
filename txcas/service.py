@@ -99,6 +99,9 @@ class CASService(Service):
         if service_manager is not None:
             sys.stderr.write("[CONFIG] Service manager: %s\n" % service_manager.__class__.__name__)
 
+        if service_manager is not None and view_provider is not None:
+            view_provider.service_manager = service_manager
+
         # Choose plugin that implements ITicketStore.
         if ticket_store is None:
             tag_args = scp.get('PLUGINS', 'ticket_store')

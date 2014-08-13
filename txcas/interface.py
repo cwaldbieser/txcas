@@ -33,6 +33,11 @@ class IServiceManagerFactory(Interface):
 
 class IServiceManager(Interface):
 
+    def getMatchingService(service):
+        """
+        Return the entry for the first matching service or None.
+        """
+
     def isValidService(service):
         """
         Returns True if the service is valid; False otherwise.
@@ -56,6 +61,8 @@ class IViewProviderFactory(Interface):
         """
 
 class IViewProvider(Interface):
+
+    service_manager = Attribute('None or an object that implements IServiceManager.')
 
     def provideView(view_type):
         """

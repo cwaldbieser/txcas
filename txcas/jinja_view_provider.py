@@ -18,7 +18,7 @@ import txcas.settings
 from jinja2 import Environment, FileSystemLoader
 from jinja2.exceptions import TemplateNotFound
 
-from twisted.internet import reactor
+from twisted.internet import reactor, defer
 from twisted.plugin import IPlugin
 from twisted.python import log
 from twisted.python.filepath import FilePath
@@ -72,6 +72,8 @@ class Jinja2ViewProvider(object):
     """
     implements(IViewProvider)
 
+    service_manager = None
+
     template_map = {
         VIEW_LOGIN: 'login.jinja2',
         VIEW_LOGIN_SUCCESS: 'login_success.jinja2',
@@ -105,15 +107,30 @@ class Jinja2ViewProvider(object):
             raise ViewNotImplementedError("The template '%s' was not found." % name)
         return templ.render(**kwds).encode('utf-8')
 
+    def _getServiceEntry(self, service):
+        """
+        """
+        service_manager = self.service_manager
+        if service_manager is None:
+            return {}
+        d = defer.maybeDeferred(service_manager.getMatchingService, service)
+        return d
+
     def renderLogin(self, login_ticket, service, failed, request):
         """
         """
-        return self._renderTemplate(
-                        VIEW_LOGIN, 
-                        login_ticket=login_ticket, 
-                        service=service, 
-                        failed=failed,
-                        request=request)
+        def render(service_entry, login_ticket, service, failed, request):
+            return self._renderTemplate(
+                            VIEW_LOGIN, 
+                            login_ticket=login_ticket, 
+                            service=service, 
+                            service_entry=service_entry,
+                            failed=failed,
+                            request=request)
+        
+        d = self._getServiceEntry(service)
+        d.addCallback(render, login_ticket, service, failed, request)
+        return d
 
     def renderLoginSuccess(self, avatar, request):
         """
@@ -133,10 +150,16 @@ class Jinja2ViewProvider(object):
     def renderInvalidService(self, service, request):
         """
         """
-        return self._renderTemplate(
-                        VIEW_INVALID_SERVICE, 
-                        service=service, 
-                        request=request)
+        def render(service_entry, service, request):
+            return self._renderTemplate(
+                            VIEW_INVALID_SERVICE, 
+                            service=service, 
+                            service_entry = service_entry,
+                            request=request)
+
+        d = self._getServiceEntry(service)
+        d.addCallback(render, service, request)
+        return d
 
     def renderError5xx(self, err, request):
         """

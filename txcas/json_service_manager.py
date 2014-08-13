@@ -144,13 +144,13 @@ class JSONServiceManager(object):
             required_params = service.setdefault('required_params', None)
             sso = service.setdefault('SSO', True)
 
-    def _getMatchingService(self, service):
+    def getMatchingService(self, service):
         """
         Get matching service or None.
         """
         cache = self._cache
         if service in cache:
-            self.debug("_getMatchingService(), cached ...")
+            self.debug("getMatchingService(), cached ...")
             return cache[service]
 
         p = urlparse.urlparse(service)
@@ -160,13 +160,13 @@ class JSONServiceManager(object):
         query = p.query
         params = cgi.parse_qs(query)
 
-        self.debug("_getMatchingService(), parsed scheme: %s, netloc: %s, path: %s, query: %s" % (
+        self.debug("getMatchingService(), parsed scheme: %s, netloc: %s, path: %s, query: %s" % (
             scheme, netloc, path, query))
 
         registry = self._registry
         match = None
         for entry in registry:
-            self.debug("_getMatchingService(), entry: %s" % str(entry))
+            self.debug("getMatchingService(), entry: %s" % str(entry))
 
             entry_scheme = entry['scheme']
             if entry_scheme != '*' and entry_scheme != scheme:
@@ -192,14 +192,14 @@ class JSONServiceManager(object):
                         continue
             match = entry 
             break
-        self.debug("_getMatchingService(), match == %s" % str(entry))
+        self.debug("getMatchingService(), match == %s" % str(entry))
         cache[service] = match
         return match
 
     def isValidService(self, service):
         if service == "":
             return True
-        result = (self._getMatchingService(service) is not None)
+        result = (self.getMatchingService(service) is not None)
         self.debug("service: '%s', result: %s" % (service, result))
         return result
 
@@ -210,7 +210,7 @@ class JSONServiceManager(object):
         """
         if service == "":
             return True
-        entry = self._getMatchingService(service)
+        entry = self.getMatchingService(service)
         if entry is None:
             self.debug("isSSOService(), service: '%s', returning False." % service)
             return False
