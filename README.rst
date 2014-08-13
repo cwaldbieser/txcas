@@ -226,6 +226,9 @@ not to, it should return `None` from the `provideView()` method.  On the other h
 if a view provider *does* provide a view, but some runtime condition prevents it 
 from doing so, it can raise a `txcas.exceptions.ViewNotImplementedError`.
 
+I am putting example "themes" (collections of templates and static resources) in
+a separate repository at https://github.com/cwaldbieser/txcas_extras
+
 Service Manager Plugins
 ^^^^^^^^^^^^^^^^^^^^^^^
 Service manager plugins are used to determine whether a service is valid.
