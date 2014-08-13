@@ -11,7 +11,7 @@ from xml.sax.saxutils import escape as xml_escape
 
 #Application modules
 from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
-                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX
+                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         CookieAuthFailed, NotSSOService, NotHTTPSError, \
                         InvalidProxyCallback, ViewNotImplementedError
@@ -30,6 +30,8 @@ from twisted.cred.error import Unauthorized, UnauthorizedLogin
 from twisted.internet import defer, reactor
 from twisted.python import log
 import twisted.web.http
+from twisted.web.static import File
+import werkzeug.exceptions
 from zope.interface import implements
 
 
@@ -176,7 +178,8 @@ class ServerApp(object):
 
     
     def __init__(self, ticket_store, realm, checkers, validService=None,
-                 requireSSL=True, page_views=None, validate_pgturl=True):
+                 requireSSL=True, page_views=None, validate_pgturl=True,
+                 static=None):
         """
         Initialize an instance of the CAS server.
 
@@ -191,7 +194,7 @@ class ServerApp(object):
             - All views may either be synchronous or async (deferreds).
             - List of views:
                 - login: rendered when credentials are requested.
-                    - Should accept args (loginTicket, service, request).
+                    - Should accept args (loginTicket, service, failed, request).
                     - Rendered page should POST to /login according to CAS protocol.
                 - login_success: Rendered when no service is specified and a
                     valid SSO session already exists.
@@ -203,9 +206,12 @@ class ServerApp(object):
                 - error5xx: Rendered on an internal error.
                     - Should accept args (err, request).
                     - `err` is a twisted.python.failure.Failure
+                - not_found: Rendered when the requested resource is not found.
+                    - Should accept `request`.
         @param validate_pgturl: If True, follow the protocol and validate the pgtUrl
             peer.  Useful to set to False for development purposes.
-                 
+        @param static_dir: None or path to a static folder to serve content
+            from at /static.
         """
         assert ticket_store is not None, "No Ticket Store was configured."
         assert realm is not None, "No Realm was configured."
@@ -221,6 +227,7 @@ class ServerApp(object):
         map(self.portal.registerChecker, checkers)
         self.validService = validService or (lambda x: True)
         self.validate_pgturl = validate_pgturl
+        self._static = static
 
         default_page_views = {
                 VIEW_LOGIN: self._renderLogin,
@@ -228,20 +235,34 @@ class ServerApp(object):
                 VIEW_LOGOUT: self._renderLogout,
                 VIEW_INVALID_SERVICE: self._renderInvalidService,
                 VIEW_ERROR_5XX: self._renderError5xx,
+                VIEW_NOT_FOUND: self._renderNotFound,
             }
         self._default_page_views = default_page_views
         if page_views is None:
-            print "[DEBUG][CAS] page_views is None"
             page_views = default_page_views
         else:
             temp = dict(default_page_views)
             temp.update(page_views)
             page_views = temp
             del temp
-        print "[DEBUG][CAS] page_views", page_views
         self.page_views = page_views
         
         self.ticket_store.register_ticket_expiration_callback(log_ticket_expiration)
+
+    def _set_response_code_filter(self, result, code, request, msg=None):
+        """
+        Set the response code during deferred chain processing.
+        """
+        request.setResponseCode(code, msg=msg)
+        return result
+        
+    def _log_failure_filter(self, err, request):
+        """
+        Log a failure.
+        """
+        log.msg('[ERROR] type="error" client_ip="%s" uri="%s"' % (request.getClientIP(), request.uri))
+        log.err(err)
+        return err
 
     def _get_page_view(self, symbol, *args):
         """
@@ -289,14 +310,17 @@ class ServerApp(object):
             
         def service_err(err, service, request):
             err.trap(InvalidService)
-            err.printTraceback(file=sys.stderr)
+            log.err(err)
             request.setResponseCode(403)
             return self._get_page_view(VIEW_INVALID_SERVICE, service, request)
 
         d = self._authenticateByCookie(request)
         d.addErrback(lambda _:self._presentLogin(request))
         d.addErrback(service_err, service, request)
-        return d.addErrback(self._page_view_errback, VIEW_ERROR_5XX,  request)
+        d.addErrback(self._log_failure_filter, request)
+        d.addErrback(self._set_response_code_filter, 500, request)
+        d.addErrback(self._page_view_errback, VIEW_ERROR_5XX,  request)
+        return d
 
     def _authenticateByCookie(self, request):
         tgc = request.getCookie(self.cookie_name)
@@ -330,7 +354,7 @@ class ServerApp(object):
         d.addErrback(eb, request)
         return d.addCallback(self._authenticated, False, service, request)
 
-    def _presentLogin(self, request):
+    def _presentLogin(self, request, failed=False):
         # If the login is presented, the TGC should be removed and the TGT
         # should be expired.
         def expireTGT():
@@ -353,17 +377,19 @@ class ServerApp(object):
        
         def service_err(err, service, request):
             err.trap(InvalidService)
-            err.printTraceback(file=sys.stderr)
+            log.err(err)
             request.setResponseCode(403)
             return self._get_page_view(VIEW_INVALID_SERVICE, service, request)
  
-        return defer.maybeDeferred(
-            expireTGT).addCallback(
-            lambda x: service).addCallback(
-            self.ticket_store.mkLoginTicket).addCallback(
-            self._page_view_result_callback, VIEW_LOGIN, service, request).addErrback(
-            service_err, service, request).addErrback(
-            self._page_view_errback, VIEW_ERROR_5XX, request)
+        d = defer.maybeDeferred(expireTGT)
+        d.addCallback(lambda x: service)
+        d.addCallback(self.ticket_store.mkLoginTicket)
+        d.addCallback(self._page_view_result_callback, VIEW_LOGIN, service, failed, request)
+        d.addErrback(service_err, service, request)
+        d.addErrback(self._log_failure_filter, request)
+        d.addErrback(self._set_response_code_filter, 500, request)
+        d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
+        return d
             
 
     def _authenticated(self, avatar_id, primaryCredentials, service, request):
@@ -428,7 +454,11 @@ class ServerApp(object):
             d.addCallback(self.realm.requestAvatar, None, ICASUser)
             d.addCallback(extract_avatar)
             d.addCallback(self._page_view_result_callback, VIEW_LOGIN_SUCCESS, request)
-        return d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
+            
+        d.addErrback(self._log_failure_filter, request)
+        d.addErrback(self._set_response_code_filter, 500, request)
+        d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
+        return d
 
     def _renderLogin(self, ticket, service, request):
         html_parts = []
@@ -491,8 +521,6 @@ class ServerApp(object):
         return html
         
     def _renderError5xx(self, err, request):
-        log.msg('[ERROR] client_ip="%s"' % request.getClientIP())
-        log.err(err)
         html = dedent("""\
             <html>
                 <head>
@@ -508,6 +536,21 @@ class ServerApp(object):
             """)
         request.setResponseCode(500)
         return html
+        
+    def _renderNotFound(self, request):
+        return dedent("""\
+            <html>
+            <head>
+                <title>Not Found</title>
+            </head>
+            <body>
+                <h1>Not Found</h1>
+                <p>
+                The resource you were looking for was not found.
+                </p>
+            </body>
+            </html>
+            """)
 
     @app.route('/login', methods=['POST'])
     def login_POST(self, request):
@@ -544,19 +587,16 @@ class ServerApp(object):
             return avatar_id
 
         def eb(err, service, request):
-            # ENHANCEMENT: It would be much better if this errorback 
-            # could trap something like an "AuthError" and throw other
-            # errors to the 5xx handler.
-            # I am not sure what kind of errors the credentail checkers
-            # will raise, though.
             if not err.check(Unauthorized):
                 log.err(err)
             params = {}
             for argname, arglist in request.args.iteritems():
                 if argname in ('service', 'renew',):
                     params[argname] = arglist
-            query = urlencode(params, doseq=True)
-            request.redirect('/login?' + query)
+            #query = urlencode(params, doseq=True)
+            #request.redirect('/login?' + query)
+            d = self._presentLogin(request, failed=True)
+            return d
 
         # check credentials
         d = self.ticket_store.useLoginTicket(ticket, service)
@@ -566,6 +606,9 @@ class ServerApp(object):
         d.addCallback(inject_avatar_id, username)
         d.addCallback(self._authenticated, True, service, request)
         d.addErrback(eb, service, request)
+        d.addErrback(self._log_failure_filter, request)
+        d.addErrback(self._set_response_code_filter, 500, request)
+        d.addErrback(self._page_view_errback, VIEW_ERROR_5XX,  request)
         return d
 
 
@@ -599,14 +642,14 @@ class ServerApp(object):
         if service != "":
             def redirect(_):
                 request.redirect(service)
-            d.addCallback(
-                _validService, service).addCallback(
-                redirect).addErrback(
-                self._page_view_errback, VIEW_ERROR_5XX, request)
+            d.addCallback(_validService, service)
+            d.addCallback(redirect)
         else:
-            d.addCallback(self._page_view_callback, VIEW_LOGOUT, request).addErrback(
-                self._page_view_errback, VIEW_ERROR_5XX, request)
+            d.addCallback(self._page_view_callback, VIEW_LOGOUT, request)
 
+        d.addErrback(self._log_failure_filter, request)
+        d.addErrback(self._set_response_code_filter, 500, request)
+        d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
         return d
 
 
@@ -662,6 +705,8 @@ class ServerApp(object):
 
         d.addCallback(renderUsername, ticket, service, request)
         d.addErrback(renderFailure, ticket, service, request)
+        d.addErrback(self._log_failure_filter, request)
+        d.addErrback(self._set_response_code_filter, 500, request)
         d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
         return d        
 
@@ -783,6 +828,8 @@ class ServerApp(object):
         d.addCallback(getAvatar)
         d.addCallback(renderSuccess, ticket, request)
         d.addErrback(renderFailure, ticket, request)
+        d.addErrback(self._log_failure_filter, request)
+        d.addErrback(self._set_response_code_filter, 500, request)
         d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
         return d        
 
@@ -912,8 +959,21 @@ class ServerApp(object):
         d.addErrback(failureResult, targetService, pgt, request)
         return d
 
+    @app.route('/static/', methods=['GET'], branch=True)
+    def static_GET(self, request):
+        static = self._static
+        if static is None:
+            log.msg('[ERROR] type="not_found" client_ip="%s" uri="%s"' % (
+                        request.getClientIP(), request.uri))
+            return self._get_page_view(VIEW_NOT_FOUND, request)
+        else:
+            return File(static)
 
-
+    @app.handle_errors(werkzeug.exceptions.NotFound)
+    def error_handler(self, request, failure):
+        log.msg('[ERROR] type="not_found" client_ip="%s" uri="%s"' % (
+                    request.getClientIP(), request.uri))
+        return self._get_page_view(VIEW_NOT_FOUND, request)
 
 
 

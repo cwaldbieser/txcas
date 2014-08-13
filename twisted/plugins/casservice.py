@@ -43,8 +43,8 @@ class Options(usage.Options, strcred.AuthOptionMixin):
                         ["help-service-manager", None, None, "Help for a specific service manager plugin."],
                         ["view-provider", None, None, "View provider plugin to use."],
                         ["help-view-provider", None, None, "Help for a specific view provider plugin."],
+                        ["static-dir", None, None, "Serve static content from STATIC_DIR."],
                     ]
-
 
 class MyServiceMaker(object):
     implements(IServiceMaker, IPlugin)
@@ -198,6 +198,9 @@ class MyServiceMaker(object):
                     sys.exit(1)
                 ticket_store = factory.generateTicketStore(ts_argstr)
 
+        # Serve static content?
+        static_dir = options.get('static-dir', None)
+
         # Create the service.
         return CASService(
                 endpoint, 
@@ -205,7 +208,8 @@ class MyServiceMaker(object):
                 realm=realm, 
                 ticket_store=ticket_store,
                 service_manager=service_manager,
-                view_provider=view_provider)
+                view_provider=view_provider,
+                static_dir=static_dir)
 
 
 # Now construct an object which *provides* the relevant interfaces

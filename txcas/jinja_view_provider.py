@@ -9,7 +9,7 @@ import urlparse
 
 # Application modules
 from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
-                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX
+                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
 from txcas.exceptions import ViewNotImplementedError
 from txcas.interface import IViewProvider, IViewProviderFactory
 import txcas.settings
@@ -78,6 +78,7 @@ class Jinja2ViewProvider(object):
         VIEW_LOGOUT: 'logout.jinja2',
         VIEW_INVALID_SERVICE: 'invalid_service.jinja2',
         VIEW_ERROR_5XX: 'error5xx.jinja2',
+        VIEW_NOT_FOUND: 'not_found.jinja2',
         }
 
     def __init__(self, template_folder):
@@ -104,13 +105,14 @@ class Jinja2ViewProvider(object):
             raise ViewNotImplementedError("The template '%s' was not found." % name)
         return templ.render(**kwds).encode('utf-8')
 
-    def renderLogin(self, login_ticket, service, request):
+    def renderLogin(self, login_ticket, service, failed, request):
         """
         """
         return self._renderTemplate(
                         VIEW_LOGIN, 
                         login_ticket=login_ticket, 
                         service=service, 
+                        failed=failed,
                         request=request)
 
     def renderLoginSuccess(self, avatar, request):
@@ -143,6 +145,13 @@ class Jinja2ViewProvider(object):
                         VIEW_ERROR_5XX, 
                         err=err, 
                         request=request)
+                        
+    def renderNotFound(self, request):
+        """
+        """
+        return self._renderTemplate(
+                        VIEW_NOT_FOUND, 
+                        request=request)
 
     def provideView(self, view_type):
         """
@@ -157,6 +166,8 @@ class Jinja2ViewProvider(object):
             return self.renderInvalidService
         elif view_type == VIEW_ERROR_5XX:
             return self.renderError5xx
+        elif view_type == VIEW_NOT_FOUND:
+            return self.renderNotFound
         else:
             return None
 

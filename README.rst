@@ -106,6 +106,12 @@ $HOME on UNIX-like systems).  The meanings of the sections are as follows:
 
       $ twistd -n cas --help-realms
 
+    - view_provider: Provide a customized view of what various server pages
+      look like.
+      For a full list of view providers, execute::
+
+      $ twistd -n cas --help-view-providers
+
     - service_manager: Manage service information including whether a service is
       valid and whether a service participates in SSO.
       For a full list of realms, execute::
@@ -204,6 +210,21 @@ Realm plugins should provide global instances that implement
 txcas.interface.ICASRealmFactory.  The factory should generate an object that
 implements the twisted...IRealm interface, similar to how credential checker 
 plugin architecture works.
+
+View Provider Plugins
+^^^^^^^^^^^^^^^^^^^^^
+A view provider is used to generate custom markup for the web pages the CAS
+service generates in response to requests.  The most obvious page is the
+login page, but there are other views that may warrant your attention for
+theming purposes.  View providers that use templating solutions will
+work best if you can serve static content from the service.  You can accomplish
+this with the :option:`static_dir` option in under the `CAS` section of the
+config file.
+
+View providers don't *have* to implement every view.  If a view provider chooses
+not to, it should return `None` from the `provideView()` method.  On the other hand,
+if a view provider *does* provide a view, but some runtime condition prevents it 
+from doing so, it can raise a `txcas.exceptions.ViewNotImplementedError`.
 
 Service Manager Plugins
 ^^^^^^^^^^^^^^^^^^^^^^^

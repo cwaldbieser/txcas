@@ -4,7 +4,7 @@ import sys
 
 # Application modules
 from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
-                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX
+                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
 from txcas.interface import IRealmFactory, IServiceManagerFactory, \
                         ITicketStoreFactory, IViewProviderFactory
 from txcas.server import ServerApp
@@ -47,7 +47,8 @@ class CASService(Service):
                 realm=None, 
                 ticket_store=None,
                 service_manager=None,
-                view_provider=None):
+                view_provider=None,
+                static_dir=None):
         """
         """
         self.port_s = endpoint_s
@@ -66,7 +67,7 @@ class CASService(Service):
                 'PLUGINS': {
                     'cred_checker': 'demo_checker',
                     'realm': 'demo_realm',
-                    'ticket_store': 'InMemoryTicketStore'}})
+                    'ticket_store': 'memory_ticket_store'}})
 
         # Choose plugin that implements IViewProvider.
         if view_provider is None and scp.has_option('PLUGINS', 'view_provider'):
@@ -170,6 +171,7 @@ class CASService(Service):
                 VIEW_LOGOUT,
                 VIEW_INVALID_SERVICE,
                 VIEW_ERROR_5XX,
+                VIEW_NOT_FOUND,
                 ]
             for symbol in symbol_table:
                 func = view_provider.provideView(symbol)
@@ -191,6 +193,12 @@ class CASService(Service):
         else:
             validService = service_manager.isValidService
  
+        # Serve static resources?
+        if static_dir is None and scp.has_option('CAS', 'static_dir'):
+            static_dir = scp.get('CAS', 'static_dir')
+        if static_dir is not None:
+            sys.stderr.write("[CONFIG] Static content served from %s\n" % static_dir)
+ 
         # Create the application. 
         app = ServerApp(
                     ticket_store, 
@@ -199,7 +207,8 @@ class CASService(Service):
                     validService=validService, 
                     requireSSL=requireSSL,
                     page_views=page_views, 
-                    validate_pgturl=validate_pgturl)
+                    validate_pgturl=validate_pgturl,
+                    static=static_dir)
         root = app.app.resource()
 
         self.site = Site(root)

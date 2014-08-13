@@ -7,6 +7,8 @@ from urllib import urlencode
 import sys
 
 #Application modules
+from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
+                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
 from txcas.interface import IRealmFactory, IServiceManagerFactory, \
                         ITicketStoreFactory
 from txcas.server import escape_html
@@ -18,7 +20,7 @@ from twisted.web import microdom
 from twisted.web.client import getPage
 
 
-def custom_login(ticket, service, request):
+def custom_login(ticket, service, failed, request):
     """
     """
     service_lookup = {
@@ -32,6 +34,11 @@ def custom_login(ticket, service, request):
         <html>
             <body>
                 <h1>CAS Login - %(service_name)s</h1>
+        ''')
+    failblurb = dedent('''\
+                <p>Login Failed.  Try again.</p>
+        ''')
+    formtop = dedent('''\
                 <form method="post" action="">
                     Username: <input type="text" name="username" />
                     <br />Password: <input type="password" name="password" />
@@ -45,6 +52,9 @@ def custom_login(ticket, service, request):
         </html>
         ''') 
     parts = [top]
+    if failed:
+        parts.append(failblurb)
+    parts.append(formtop)
     if service != "":
         parts.append(middle)
     parts.append(bottom)
@@ -455,26 +465,27 @@ if __name__ == "__main__":
         from twisted.cred.strcred import ICheckerFactory
         from txcas.server import ServerApp
 
-        page_views = {'login': custom_login}
-        #page_views = None
+        page_views = {VIEW_LOGIN: custom_login}
 
         # Load the config.
         scp = txcas.settings.load_settings('cas', syspath='/etc/cas', defaults={
                 'PLUGINS': {
                     'cred_checker': 'DemoChecker',
                     'realm': 'demo_realm',
-                    'ticket_store': 'memory_ticket_store'}})
+                    'ticket_store': 'memory_ticket_store',}})
 
         # Choose plugin that implements IServiceManager.
-        tag_args = scp.get('PLUGINS', 'service_manager')
-        parts = tag_args.split(':')
-        tag = parts[0]
-        args = ':'.join(parts[1:])
-        factory = txcas.settings.get_plugin_factory(tag, IiServiceManagerFactory)
-        if factory is None:
-            sys.stderr.write("[ERROR] Service manager type '%s' is not available.\n" % tag)
-            sys.exit(1)
-        service_maanger = factory.generateServiceManager(args)
+        service_manager = None
+        if scp.has_option('PLUGINS', 'service_manager'):
+            tag_args = scp.get('PLUGINS', 'service_manager')
+            parts = tag_args.split(':')
+            tag = parts[0]
+            args = ':'.join(parts[1:])
+            factory = txcas.settings.get_plugin_factory(tag, IServiceManagerFactory)
+            if factory is None:
+                sys.stderr.write("[ERROR] Service manager type '%s' is not available.\n" % tag)
+                sys.exit(1)
+            service_manager = factory.generateServiceManager(args)
 
         # Choose plugin that implements ITicketStore.
         tag_args = scp.get('PLUGINS', 'ticket_store')

@@ -7,11 +7,16 @@ pgt_lifespan = 600
 tgt_lifespan = 86400
 validate_pgturl = 0
 ticket_size = 256
+static_dir = /path/to/static/content
 
 [PLUGINS]
 cred_checker = ldap_simple_bind
 realm = ldap_realm
+view_provider = jinja2_view_provider
 ticket_store = couchdb_ticket_store
+
+[Jinja2ViewProvider]
+template_dir = /path/to/templates
 
 [JSONServiceManager]
 path = /path/to/serviceRegistry.json
