@@ -172,7 +172,7 @@ def make_cas_attributes(attribs):
          <cas:affiliation>faculty</cas:affiliation>
    </cas:attributes>
     """
-    if len(attribs) == 0:
+    if attribs is None or len(attribs) == 0:
         return ""
     parts = ["        <cas:attributes>"]
     for k, v in attribs:
