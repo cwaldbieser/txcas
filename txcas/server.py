@@ -14,7 +14,8 @@ from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
                         VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         CookieAuthFailed, NotSSOService, NotHTTPSError, \
-                        InvalidProxyCallback, ViewNotImplementedError
+                        InvalidProxyCallback, ViewNotImplementedError, \
+                        BadRequestError
 import txcas.http
 from txcas.interface import ICASUser, ITicketStore
 from txcas.utils import http_status_filter
@@ -78,6 +79,39 @@ html_escape_table = {
     ">": "&gt;",
     "<": "&lt;",
     }
+
+def get_single_param(request, param):
+    """
+    Checks to make sure there is *exactly* one parameter, `param` in
+    request.args and returns its value.
+    If the named parameter does not exist or exists multiple times, this
+    function raises a txcas.exceptions.BadRequestError
+    """
+    args = request.args
+    if not param in args:
+        raise BadRequestError("The parameter '%s' is missing." % param)
+    value_list = args[param]
+    if len(value_list) != 1:
+        raise BadRequestError("Multiple values for parameter '%s' were provided." % param)
+    return value_list[0]
+    
+def get_single_param_or_default(request, param, default=None):
+    """
+    Checks to make sure there is *exactly* one parameter, `param` in
+    request.args and returns its value.
+    
+    If the named parameter does not exist, return `default`.
+    
+    If the named parameter exists multiple times, this
+    function raises a txcas.exceptions.BadRequestError.
+    """
+    args = request.args
+    if not param in args:
+        return default
+    value_list = args[param]
+    if len(value_list) != 1:
+        raise BadRequestError("Multiple values for parameter '%s' were provided." % param)
+    return value_list[0]
 
 def escape_html(text):
     """Produce entities within text."""
@@ -303,8 +337,8 @@ class ServerApp(object):
         authenticate using an existing TGC.
         """
         log_http_event(request)
-        service = request.args.get('service', [""])[0]
-        renew = request.args.get('renew', [""])[0]
+        service = get_single_param_or_default(request, 'service', "")
+        renew = get_single_param_or_default(request, 'renew', "")
         if renew != "":
             return self._presentLogin(request)
             
@@ -329,7 +363,7 @@ class ServerApp(object):
         # Q: Should the ticket-granting cookie be checked for expiration?
         # I think a browser won't send expired cookies.  Anyway, expiration
         # should happen on the server.
-        service = request.args.get('service', [""])[0]
+        service = get_single_param_or_default(request, 'service', "")
 
         def log_tgc_auth(result, request):
             client_ip = request.getClientIP()
@@ -367,8 +401,8 @@ class ServerApp(object):
                 d = self.ticket_store.expireTGT(tgc)
                 return d
             return None
-        service = request.args.get('service', [""])[0]
-        gateway = request.args.get('gateway', [""])[0]
+        service = get_single_param_or_default(request, 'service', "")
+        gateway = get_single_param_or_default(request, 'gateway', "")
         if gateway != "" and service != "":
             #Redirect to `service` with no ticket.
             request.redirect(service)            
@@ -559,11 +593,11 @@ class ServerApp(object):
         appropriately.
         """
         log_http_event(request, redact_args=['password'])
-        service = request.args.get('service', [""])[0]
-        renew = request.args.get('renew', [""])[0]
-        username = request.args.get('username', [None])[0]
-        password = request.args.get('password', [None])[0]
-        ticket = request.args.get('lt', [None])[0]
+        service = get_single_param_or_default(request, 'service', "")
+        renew = get_single_param_or_default(request, 'renew', "")
+        username = get_single_param_or_default(request, 'username', None)
+        password = get_single_param_or_default(request, 'password', None)
+        ticket = get_single_param_or_default(request, 'lt', None)
 
         def checkPassword(_, username, password):
             credentials = UsernamePassword(username, password)
@@ -589,12 +623,7 @@ class ServerApp(object):
         def eb(err, service, request):
             if not err.check(Unauthorized):
                 log.err(err)
-            params = {}
-            for argname, arglist in request.args.iteritems():
-                if argname in ('service', 'renew',):
-                    params[argname] = arglist
-            #query = urlencode(params, doseq=True)
-            #request.redirect('/login?' + query)
+
             d = self._presentLogin(request, failed=True)
             return d
 
@@ -615,7 +644,7 @@ class ServerApp(object):
     @app.route('/logout', methods=['GET'])
     def logout_GET(self, request):
         log_http_event(request)
-        service = request.args.get('service', [""])[0]
+        service = get_single_param_or_default(request, 'service', "")
         def _validService(_, service):
             def eb(err):
                 err.trap(InvalidService)
@@ -659,9 +688,9 @@ class ServerApp(object):
         Validate a service ticket, consuming the ticket in the process.
         """
         log_http_event(request)
-        ticket = request.args.get('ticket', [""])[0]
-        service = request.args.get('service', [""])[0]
-        renew = request.args.get('renew', [""])[0]
+        ticket = get_single_param_or_default(request, 'ticket', "")
+        service = get_single_param_or_default(request, 'service', "")
+        renew = get_single_param_or_default(request, 'renew', "")
         if service == "" or ticket == "":
             request.setResponseCode(403)
             return 'no\n\n'
@@ -724,10 +753,10 @@ class ServerApp(object):
         """
         Validate a service ticket or proxy ticket, consuming the ticket in the process.
         """
-        ticket = request.args.get('ticket', [None])[0]
-        service = request.args.get('service', [None])[0]
-        pgturl = request.args.get('pgtUrl', [""])[0]
-        renew = request.args.get('renew', [""])[0]
+        ticket = get_single_param_or_default(request, 'ticket', None)
+        service = get_single_param_or_default(request, 'service', None)
+        pgturl = get_single_param_or_default(request, 'pgtUrl', "")
+        renew = get_single_param_or_default(request, 'renew', "")
         
         if service is None or ticket is None:
             request.setResponseCode(400)
@@ -917,9 +946,10 @@ class ServerApp(object):
     def proxy_GET(self, request):
         log_http_event(request)
         try:
-            pgt = request.args['pgt'][0]
-            targetService = request.args['targetService'][0]
-        except KeyError:
+            pgt = get_single_param(request, 'pgt')
+            targetService = get_single_param(request, 'targetService')
+        except BadRequestError as ex:
+            log.err(ex)
             request.setResponseCode(400)
             # Enhancement: page view
             return "Bad Request"
@@ -976,7 +1006,11 @@ class ServerApp(object):
         return self._get_page_view(VIEW_NOT_FOUND, request)
 
 
-
+    @app.handle_errors(BadRequestError)
+    def handle_bad_request(self, request, failure):
+        log.msg('[ERROR] type="bad_request" client_ip="%s" uri="%s"' % (
+                    request.getClientIP(), request.uri))
+        return self._get_page_view(VIEW_ERROR_5XX, failure, request)
         
             
             

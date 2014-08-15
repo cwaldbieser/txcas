@@ -28,6 +28,67 @@ def normalize_netloc(scheme, netloc):
             netloc = '%s:80' % netloc
     return netloc
 
+def parse_netloc(netloc):
+    """
+    Returns (host, port).
+    `port` may be None.
+    """
+    parts = netloc.split(':', 1)
+    if len(parts) == 1:
+        return (parts[0], None)
+    else:
+        return tuple(parts)
+
+def get_domain_components(host_or_domain):
+    """
+    Returns a list of domain components from a netloc.
+    """
+    domain_components = host_or_domain.split('.')
+    return domain_components
+    
+def compare_host_to_domain(host, domain):
+    """
+    Return True if the host matches the domain.
+    Return False otherwise.
+    """
+    host_components = get_domain_components(host)
+    domain_components = get_domain_components(domain)
+    
+    hc_count = len(host_components) 
+    dc_count = len(domain_components)
+    
+    # E.g.
+    # host  : foo.example.com
+    # domain: *.*.example.com
+    if hc_count < dc_count:
+        return False
+        
+    while len(domain_components) > 0:
+        dc = domain_components.pop()
+        hc = host_components.pop()
+        if dc not in ('*', '**') and hc != dc:
+            return False
+    
+    # An exact match.
+    if len(host_components) == 0:
+        return True
+    
+    # The host is too long.  E.g.
+    # host  : foo.baz.example.com
+    # domain:       *.example.com
+    #         ^^^
+    #         Not a match!
+    if dc != '**':
+        return False
+        
+    # The host is longer, but the domain starts with a '**', so it
+    # is gobbles up the remaining components and matches.
+    # host  : foo.baz.example.com
+    # domain:      **.example.com
+    #         ^^^^^^^
+    # The double-star matches the remaining host components.
+    return True
+
 def compare_paths(allowed_path, path, allow_child_paths=False):
     """
     """
@@ -90,6 +151,8 @@ class JSONServiceManagerFactory(object):
 
 class JSONServiceManager(object):
     """
+    Basic structure::
+    
     [
         {
             'name': 'Service Name',
@@ -173,9 +236,21 @@ class JSONServiceManager(object):
                 self.debug("schemes don't match.")
                 continue
             entry_netloc = normalize_netloc(scheme, entry['netloc'])
-            if netloc != entry_netloc:
-                self.debug("netlocs don't match.")
+
+            # The actual service should not have a '*' in the netloc!
+            if '*' in netloc:
                 continue
+            entry_domain, entry_port = parse_netloc(entry_netloc)
+            service_host, service_port = parse_netloc(netloc)
+            
+            if entry_port != '*' and entry_port != service_port:
+                self.debug("ports don't match.")
+                continue
+            
+            if not compare_host_to_domain(service_host, entry_domain):
+                self.debug("host doesn't match domain.")
+                continue
+                
             entry_path = entry['path']
             if not compare_paths(entry_path, path, allow_child_paths=entry['child_paths']):
                 self.debug("paths don't match.")

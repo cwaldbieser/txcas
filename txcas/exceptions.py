@@ -28,3 +28,6 @@ class NotHTTPSError(CASError):
 
 class ViewNotImplementedError(CASError):
     pass
+
+class BadRequestError(CASError):
+    pass
