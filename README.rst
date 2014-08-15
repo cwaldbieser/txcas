@@ -9,24 +9,8 @@ The protocol: http://www.jasig.org/cas/protocol
 Examples
 --------
 
-Running the Server
-------------------
-Copy :file:`cas.tac.example` to :file:`cas.tac`.  Then
-edit the settings in :file:`cas.tac` then run it with::
-
-    $ twistd -n -y cas.tac
-
-To run as a daemon (in the background even when you log out 
-of the shell), omit the `-n` option.
-
-You can also run the server and specify the endpoint options 
-from the command line::
-
-    $ twistd -n cas -p 9800
-
-
-Running the Server Plus Example Services
-----------------------------------------
+Running the Demonstration
+-------------------------
 The service comes with a ready-to-run demonstration using a basic
 credential checker (single user 'foo' with password 'password'), 
 a demo user realm (provides 2 made up attributes), and an in-memory
@@ -44,14 +28,16 @@ Service 3 runs on port 9803.
 Service 4 runs on port 9804.
 All services listen on localhost (127.0.0.1).
 
-The demonstration program does not use the cas.tac endpoint 
+The demo runs *without* a :file:`cas.cfg` file, using default
+settings.  You *can* create a config file, and the but
+the demonstration program does not use the :file:`cas.tac` endpoint 
 configuration.  The CAS server and the services run over HTTP (no SSL)
 in the demonstration.  Running over HTTPS would require setting up
 a self-signed cert at the minimum, and I really just wanted the
 demo to run without any extra configuration.
 
-Plugin options are honored, so if you want to try out the demo 
-using a CouchDB ticket store or an LDAP realm, you can.
+Plugin options in the config are honored, so if you want to try 
+out the demo using a CouchDB ticket store or an LDAP realm, you can.
 
 Point a browser to service 1 at http://127.0.0.1:9801/ .  You
 will be redirected to the CAS server to log in.  Use 'foo' and
@@ -71,17 +57,38 @@ proxy service 4.  The result returned will show the complete proxy chain.
 
 Service 3 requires you to use primary credentials to log in.
 
+Running the Server
+------------------
+Copy :file:`cas.tac.example` to :file:`cas.tac`.  Then
+edit the settings in :file:`cas.tac` then run it with::
+
+    $ twistd -n -y cas.tac
+
+To run as a daemon (in the background even when you log out 
+of the shell), omit the `-n` option.
+
+You can also run the server and specify the options 
+from the command line.  The following example runs the server
+on port 9800.::
+
+    $ twistd -n cas -p 9800
+
+To get a list of all command line options::
+
+    $ twistd -n cas --help
+
+
 Plugins
 -------
-Various plugins exist for Credential Checkers, User Realms, and Ticket Stores.
-These are configured in :file:`cas.cfg`.  Some plugins require additional
-dependencies.  E.g. the LDAP-based plugins require ldaptor 
+Various plugins exist for Credential Checkers, User Realms, View Providers, 
+and Ticket Stores.  These are configured in :file:`cas.cfg`.  Some plugins 
+require additional dependencies.  E.g. the LDAP-based plugins require ldaptor 
 (https://github.com/twisted/ldaptor).
 
 Configuration
 -------------
 The endpoint for the service (port, HTTP or HTTPS, cert files, SSL options, etc.) 
-is configured in :file:`cas.tac`.  
+can be configured in :file:`cas.tac` when running the server without command line options.  
 The main configuration file is called :file:`cas.cfg` (or :file:`.casrc` if located in your
 $HOME on UNIX-like systems).  The meanings of the sections are as follows:
 
@@ -124,6 +131,16 @@ $HOME on UNIX-like systems).  The meanings of the sections are as follows:
 
       $ twistd -n cas --help-ticket-stores
 
+A sample configuration file, :file:`cas.cfg.example` is provided to give an idea
+of various sections and options.
+
+The JSONServiceManager plugin uses a file in JSON format, 
+:file:`serviceRegistry.json` to determine what services are allowed by the 
+service.  While the keys shown in the config file have special meanings to the 
+service manager, you can extend the entries with your own attributes which can 
+be used in view providers.  The exact means by which this information is made 
+available is specific to each view provider.
+
 LDAP Configuration
 ==================
 The LDAPSimpleBindChecker and LDAPUSerRealm plugins require a configuration
@@ -134,6 +151,9 @@ section called "LDAP" that supports the following options:
 - basedn
 - binddn
 - bindpw
+
+Currently this plugin assumes that the connection will be encrypted using 
+StartTLS immediately after the connection is established.
 
 CouchDB Configuration
 =====================
@@ -153,7 +173,7 @@ The CouchDBTicketStore plugin requires a configuration section called
 The CouchDB database itself will need to be configured with the appropriate views.
 You can set up the database views by running the :program:`setup_couchdb.py` program.
 You should create an empty database before running the script and have DB admin
-credentials.  The script will prompt you for the necessay information.
+credentials.  The script will prompt you for the necessary information.
 
 Development
 -----------
