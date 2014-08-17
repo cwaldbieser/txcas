@@ -16,6 +16,7 @@ Contents:
    configuration
    authentication
    user_realms
+   ticket_stores
 
    glossary
 
