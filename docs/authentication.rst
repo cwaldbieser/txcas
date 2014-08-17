@@ -11,8 +11,8 @@ authenticates them.  If successful, it returns an avatarID that the user
 realm will use to produce an :term:`avatar`.
 
 Currently, txcas supports accepting simple username/password credentials.  A
-number of built-in credential checkers are available that support this 
-credential type:  memory, file, unix.  txcas also includes support for the
+number of credential checkers are available in `Twisted Cred`_  that support this 
+credential type.  txcas also includes support for the
 ldap_simple_bind credential checker via the `ldaptor`_ library.
 
 Configuration
@@ -30,16 +30,48 @@ An authentication method is selected via the :option:`cred_checker` option in th
 * :option:`ldap_simple_bind`:  Attempts a simple BIND against an LDAP server.
   The LDAP options can be configured by appending a colon to this option and
   providing colon-separated key=value pairs *or* by configuring options in the
-  LDAP section of the main config file (the latter method is preferred).  The
-  LDAP options are:
+  LDAP section of the main config file (the latter method is preferred).
+
+  Currently, the transport is encrypted after the initial connection is made
+  using `STARTTLS`_.  A 2-stage BIND is used.  In stage 1, an service DN
+  and password are used to BIND in order to serach for the target entry.
+  If the target entry is located, this authenticator attempts to BIND using
+  the password supplied at the CAS login.
+
+  The LDAP options are:
 
   * :option:`host`
   * :option:`port`
   * :option:`basedn`
   * :option:`binddn`
   * :option:`bindpw`
-  * :option:`query_template`: Defaults to `(uid=%(username)s)`
+  * :option:`query_template`: Defaults to `(uid=%(username)s)`.  The query 
+    template is a filter that will be used by the LDAP service to identify
+    the entry that it will attempt to BIND as using the supplied password.
+    The `%(username)s` part of the filter will be substituted with the provided
+    username in order to produce the final filter.  The username will be escaped
+    according to LDAP filter rules.  The default template attempts to locate an 
+    entry where the `uid` attribute matches the provided username.  If no 
+    matching entry is located, or if multiple matching entries are located, 
+    authentication will fail.
+
+If you have added additional plugins to your :file:`$TXCAS/twisted/plugins` 
+folder, additional option values may be available.  The plugin documentation 
+should cover these.  You can also list the available plugins with the following
+command::
+
+    $ twistd -n cas --help-auth
+
+Troubleshooting
+---------------
+If you install a credential checker plugin but don't see it listed as a valid
+option, you can try running the :command:`./plugin_test.py` script from the
+main project folder.  This script is a simple diagnostic that lists all 
+available plugins of the types relevant to txcas.  Pay special attention to
+any error output produced, as it may indicate some kind of problem with the
+plugin installation.
 
 
 .. _Twisted Cred: https://twistedmatrix.com/documents/14.0.0/core/howto/cred.html
 .. _ldaptor: https://github.com/twisted/ldaptor
+.. _STARTTLS: http://en.wikipedia.org/wiki/STARTTLS
