@@ -66,15 +66,6 @@ command::
 
     $ twistd -n cas --help-realms
 
-Troubleshooting
----------------
-If you install a credential checker plugin but don't see it listed as a valid
-option, you can try running the :command:`./plugin_test.py` script from the
-main project folder.  This script is a simple diagnostic that lists all 
-available plugins of the types relevant to txcas.  Pay special attention to
-any error output produced, as it may indicate some kind of problem with the
-plugin installation.
-
 
 .. _Twisted Cred: https://twistedmatrix.com/documents/14.0.0/core/howto/cred.html
 .. _STARTTLS: http://en.wikipedia.org/wiki/STARTTLS

@@ -17,6 +17,9 @@ Contents:
    authentication
    user_realms
    ticket_stores
+   service_managers
+
+   plugin_troubleshooting
 
    glossary
 
