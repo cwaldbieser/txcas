@@ -5,6 +5,7 @@ A CAS server implemented with Twisted
 
 The protocol: http://www.jasig.org/cas/protocol
 
+Full documentation is hosted at http://txcas.readthedocs.org/
 
 Examples
 --------
