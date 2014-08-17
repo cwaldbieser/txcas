@@ -15,6 +15,7 @@ Contents:
    installation
    configuration
    authentication
+   user_realms
 
    glossary
 

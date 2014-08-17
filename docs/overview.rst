@@ -30,8 +30,8 @@ Goals
 My goals for this project are as follows:
 
 * Produce a working, production quality CAS server that implements all the required
-  features of the CAS protocol v2 and v3.  I am not implementing the old `/samlValidate`
-  support, as the CAS protocol v3 now supports attribute release.
+  features of the CAS protocol v2 and v3.  I am not implementing `/samlValidate`
+  support, as the CAS protocol v3 supports attribute release.
 * Provide a flexible and customizable plugin architecture.  Don't try to include
   every option in the core server.
 * Keep the code base simple to learn and understand.
