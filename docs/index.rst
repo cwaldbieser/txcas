@@ -18,7 +18,7 @@ Contents:
    user_realms
    ticket_stores
    service_managers
-
+   view_providers
    plugin_troubleshooting
 
    glossary
