@@ -25,9 +25,11 @@ class Options(usage.Options, strcred.AuthOptionMixin):
 
     optFlags = [
             ["ssl", "s", "Use SSL"],
+            ["dont-validate-pgturl", None, "Don't validate pgtUrls."],
             ["help-realms", None, "List user realm plugins available."],
             ["help-ticket-stores", None, "List ticket store plugins available."],
             ["help-service-managers", None, "List service manager plugins available."],
+            ["help-view-providers", None, "List view provider plugins available."],
             ["help-view-providers", None, "List view provider plugins available."],
         ]
 
@@ -201,6 +203,13 @@ class MyServiceMaker(object):
         # Serve static content?
         static_dir = options.get('static-dir', None)
 
+        # Validate pgtUrls?
+        dont_validate_pgturl = options.get('dont-validate-pgturl', None)
+        if dont_validate_pgturl:
+            validate_pgturl = False
+        else:
+            validate_pgturl = None
+
         # Create the service.
         return CASService(
                 endpoint, 
@@ -209,7 +218,9 @@ class MyServiceMaker(object):
                 ticket_store=ticket_store,
                 service_manager=service_manager,
                 view_provider=view_provider,
-                static_dir=static_dir)
+                static_dir=static_dir,
+                validate_pgturl=validate_pgturl,
+                )
 
 
 # Now construct an object which *provides* the relevant interfaces

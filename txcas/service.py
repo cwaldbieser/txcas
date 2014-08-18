@@ -48,7 +48,8 @@ class CASService(Service):
                 ticket_store=None,
                 service_manager=None,
                 view_provider=None,
-                static_dir=None):
+                static_dir=None,
+                validate_pgturl=None):
         """
         """
         self.port_s = endpoint_s
@@ -62,11 +63,11 @@ class CASService(Service):
                     'pgt_lifespan': 600,
                     'tgt_lifespan': 86400,
                     'validate_pgturl': 1,
-                    'ticket_size': 256,
+                    'ticket_size': 128,
                 },
                 'PLUGINS': {
-                    'cred_checker': 'demo_checker',
-                    'realm': 'demo_realm',
+                    'cred_checker': 'file:./cas_users.passwd',
+                    'realm': 'basic_realm',
                     'ticket_store': 'memory_ticket_store'}})
 
         # Choose plugin that implements IViewProvider.
@@ -176,7 +177,12 @@ class CASService(Service):
                     page_views[symbol] = func
         
         # Validate PGT URL?
-        validate_pgturl = get_bool_opt(scp, 'CAS', 'validate_pgturl')
+        if validate_pgturl is None:
+            validate_pgturl = get_bool_opt(scp, 'CAS', 'validate_pgturl')
+        if validate_pgturl:
+            sys.stderr.write("[CONFIG] pgtUrls will be validated.\n")
+        else:
+            sys.stderr.write("[CONFIG] pgtUrls will *NOT* be validated.\n")
         
         # TGC uses "secure"?
         if endpoint_s.startswith("ssl:"):
