@@ -13,6 +13,7 @@ Contents:
 
    overview
    installation
+   demonstration
    configuration
    authentication
    user_realms
@@ -20,6 +21,7 @@ Contents:
    service_managers
    view_providers
    plugin_troubleshooting
+   development
 
    glossary
 

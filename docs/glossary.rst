@@ -27,6 +27,11 @@ Glossary
         or different participating services, often for a specific period of
         time.
 
+    TAC FILE
+        A Twisted Application Configuration file.  A regular Python file used
+        to configure a Twisted Application.  Endpoint settings (interface, 
+        port, SSL settings) are commonly configured in this type of file.
+
     TGT
         Ticket Granting Ticket.  A ticket issued when a CAS session is started
         by providing primary credentials.  The TGT is then used to request

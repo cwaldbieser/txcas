@@ -33,20 +33,21 @@ CAS
 This section is used for configuring basic CAS behavior.  Options are:
 
 * :option:`lt_lifespan`: The length of time, in seconds, before a login 
-  ticket expires.
+  ticket expires.  Default 300
 * :option:`st_lifespan`: The length of time, in seconds, before a service 
-  ticket expires.
+  ticket expires.  Default 10
 * :option:`pt_lifespan`: The length of time, in seconds, before a proxy 
-  ticket expires.
+  ticket expires.  Default 10
 * :option:`pgt_lifespan`: The length of time, in seconds, before a proxy 
-  granting ticket expires.
+  granting ticket expires.  Default 600
 * :option:`tgt_lifespan`: The length of time, in seconds, before a ticket 
-  granting ticket expires.
+  granting ticket expires.  Default 86400
 * :option:`validate_pgturl`: Validate a `pgtUrl` callback certificate, as per
   the CAS protocol.  Default is 1 (True).
-* :option:`ticket_size`: The ticket size in characters.
+* :option:`ticket_size`: The ticket size in characters.  Default 128
 * :option:`static_dir`: If this option is set to a folder, the cas service will
-  serve static content out of this folder to the `/static` resource.
+  serve static content out of this folder to the `/static` resource.  By
+  default, no static content is served.
 
 Plugins
 -------
@@ -55,13 +56,18 @@ This section is used to enable the plugins used for various parts of the service
 The plugin options supported are:
 
 * :option:`cred_checker`: The tag used to determine the mechanism that will
-  be used for authenticating the credentials presented to the service.
+  be used for authenticating the credentials presented to the service.  If
+  this option is not specified, the service defaults to using a file-based
+  user database named :file:`./cas_users.passwd`.  Entries are assumed to
+  be in `user:password` format, one entry per line.
 * :option:`realm`: The tag used to determine the plugin that will create an
   avatar that will be exposed to a service, mainly via attribute release.  A
   realm receives an avatar ID that will have already been autheticated via a
-  cred_checker.
+  cred_checker.  If this option is not specified, the service defaults to
+  using a basic realm that does not include any attributes.
 * :option:`ticket_store`: The tag used to determine the plugin that will be
-  used to manage tickets that CAS uses.
+  used to manage tickets that CAS uses.  If this option is not specified,
+  the service defaults to using the in-memory ticket store.
 * :option:`service_manager`: The tag used to determine the plugin that will
   be used to determine whether a service is allowed to authenticate with this
   CAS service.  A service manager also determines if the service participates 
@@ -70,7 +76,8 @@ The plugin options supported are:
   specified, CAS will run in *open* mode, and any service will be allowed to 
   authenticate with this CAS service.
 * :option:`view_provider`: The tag used to determine the plugin that will be 
-  used to provide customized views of CAS pages.
+  used to provide customized views of CAS pages.  If not specified, the service
+  will provide its own functional but lackluster views.
 
 Sections Specific to Plugins
 ----------------------------

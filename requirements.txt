@@ -6,7 +6,7 @@ cffi==0.8.6
 characteristic==0.1.0
 cryptography==0.5.2
 klein==0.2.3
-ldaptor==0.0.54
+git+https://github.com/cwaldbieser/ldaptor
 pyOpenSSL==0.14
 pyasn1==0.1.7
 pyasn1-modules==0.0.5
