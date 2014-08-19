@@ -68,3 +68,5 @@ plugins.  The included Jinja2_ view provider allows you to design pages
 using powerful yet easy to use Jinja2 templates (see 
 http://jinja.pocoo.org/docs/templates/).
 
+A sample theme using Bootstrap 3 is available at 
+https://github.com/cwaldbieser/txcas_extras.
