@@ -18,8 +18,9 @@ Features
 * Open source Python code making heavy use of the Twisted networking library.
 * Flexible plugin architecture, allowing customization of major architectural
   components.
-* Plugins for Authentication, User Realms, Ticket Stores, Service Managers, and
-  View Providers.
+* Plugins for Authentication (file, unix, LDAP), User Realms (basic, LDAP), 
+  Ticket Stores (in-memory, CouchDB), Service Managers (JSON), and
+  View Providers (Jinja2 templates).
 * Simple configuration.
 
 -------------------------
@@ -58,4 +59,12 @@ on port 9800.::
 To get a list of all command line options::
 
     $ twistd -n cas --help
+
+----------
+Appearance
+----------
+The HTML pages presented by txcas are fully customizable via view provider
+plugins.  The included Jinja2_ view provider allows you to design pages
+using powerful yet easy to use Jinja2 templates (see 
+http://jinja.pocoo.org/docs/templates/).
 
