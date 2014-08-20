@@ -23,14 +23,15 @@ def load_defaults(defaults):
     scp.readfp(buf)
     return scp
     
-def load_settings(config_basename, defaults=None, syspath=None):
+def load_settings(config_basename, defaults=None, syspath=None, appdir=None):
     """
     Load settings.
     """
     if defaults is None:
         defaults = {}
     scp = load_defaults(defaults)
-    appdir = os.path.dirname(os.path.dirname(__file__))
+    if appdir is None:
+        appdir = os.path.dirname(os.path.dirname(__file__))
     paths = []
     if syspath is not None:
         paths.append(os.path.join(syspath, "%s.cfg" % config_basename))
