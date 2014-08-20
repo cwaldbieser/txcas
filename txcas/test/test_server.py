@@ -254,13 +254,26 @@ class TicketStoreTester(object):
 
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
 
+        yield self.assertTrue(pgt.startswith('PGT-'))
+        yield self.assertEqual(len(pgt), ticket_size)
+
         # Should not be able to use PGT after it has expired.
         self.clock.advance(store.pgt_lifespan)
         yield self.assertFailure(store.mkProxyTicket(service, pgt), txcas.exceptions.InvalidTicket)
         
     @defer.inlineCallbacks
     def test_TicketGrantingTicket(self):
-        raise NotImplementedError()
+        store = self.store
+        ticket_size = self.ticket_size
+        service = self.service
+
+        tgt = yield self.makeTicketGrantingCookie()
+        yield self.assertTrue(tgt.startswith('TGC-'))
+        yield self.assertEqual(len(tgt), ticket_size)
+
+        # Should not be able to use TGT after it has expired.
+        self.clock.advance(store.tgt_lifespan)
+        yield self.assertFailure(store.mkServiceTicket(service, tgt, False), txcas.exceptions.InvalidTicket)
 
     #@defer.inlineCallbacks
     #def test_loginTicket_service(self):

@@ -229,14 +229,14 @@ class CouchDBTicketStore(object):
     def _validService(self, service):
         def cb(result):
             if not result:
-                raise InvalidService(service)
+                return defer.fail(InvalidService(service))
             return service
         return defer.maybeDeferred(self._getServiceValidator(), service).addCallback(cb)
 
     def _isSSOService(self, service):
         def cb(result):
             if not result:
-                raise NotSSOService(service)
+                return defer.fail(NotSSOService(service))
         return defer.maybeDeferred(self._getServiceSSOPredicate(), service).addCallback(cb)
 
     def _generate(self, prefix):
@@ -503,12 +503,12 @@ class CouchDBTicketStore(object):
         Use a login ticket.
         """
         if not ticket.startswith("LT-"):
-            raise InvalidTicket()
+            return defer.fail(InvalidTicket())
         def doit(_):
             d = self._useTicket(ticket)
             def cb(data):
                 if data[u'service'] != service:
-                    raise InvalidTicket()
+                    return defer.fail(InvalidTicket())
             return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
 
@@ -550,7 +550,7 @@ class CouchDBTicketStore(object):
         Create a proxy ticket
         """
         if not pgt.startswith("PGT-"):
-            return defer.fail(InvalidTicket())
+            raise InvalidTicket()
 
         pgt_info = yield self._fetch_ticket(pgt)
         if pgt_info is None:
@@ -559,7 +559,7 @@ class CouchDBTicketStore(object):
         try:
             tgt = pgt_info[u'tgt']
         except KeyError:
-            return defer.fail(InvalidTicket("PGT '%s' is invalid." % pgt))
+            raise InvalidTicket("PGT '%s' is invalid." % pgt)
         yield self._validService(service)
         pt = yield self._mkTicket('PT-', {
                 'avatar_id': pgt_info[u'avatar_id'],
@@ -585,15 +585,15 @@ class CouchDBTicketStore(object):
         """
         if not ticket.startswith("ST-"):
             if not ticket.startswith("PT-") and _allow_pt:
-                raise InvalidTicket()
+                return defer.fail(InvalidTicket())
                 
         def doit(_):
             d = self._useTicket(ticket)
             def cb(data):
                 if data[u'service'] != service:
-                    raise InvalidTicket()
+                    return defer.fail(InvalidTicket())
                 if requirePrimaryCredentials and data['primary_credentials'] == False:
-                    raise InvalidTicket("This ticket was not issued in response to primary credentials.")
+                    return defer.fail(InvalidTicket("This ticket was not issued in response to primary credentials."))
                 return data
             return d.addCallback(cb)
             
@@ -658,7 +658,7 @@ class CouchDBTicketStore(object):
         Expire the TGT identified by 'ticket'.
         """
         if not ticket.startswith("TGC-"):
-            raise InvalidTicket()
+            return defer.fail(InvalidTicket())
         
         d = self._useTicket(ticket)
         def cb(data):
