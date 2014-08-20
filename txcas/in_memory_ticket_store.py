@@ -307,19 +307,18 @@ class InMemoryTicketStore(object):
         Create a proxy ticket
         """
         if not pgt.startswith("PGT-"):
-            raise InvalidTicket()
+            return defer.fail(InvalidTicket())
 
         try:
             pgt_info = self._tickets[pgt]
         except KeyError:
-            raise InvalidTicket("PGT '%s' is invalid." % pgt)
+            return defer.fail(InvalidTicket("PGT '%s' is invalid." % pgt))
         pgturl = pgt_info['pgturl']
 
         try:
             tgt = pgt_info['tgt']
         except KeyError:
-            raise InvalidTicket("PGT '%s' is invalid." % pgt)
-
+            return defer.fail(InvalidTicket("PGT '%s' is invalid." % pgt))
             
         def doit(_):
             return self._mkTicket('PT-', {

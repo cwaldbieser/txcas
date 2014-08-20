@@ -550,7 +550,7 @@ class CouchDBTicketStore(object):
         Create a proxy ticket
         """
         if not pgt.startswith("PGT-"):
-            raise InvalidTicket()
+            return defer.fail(InvalidTicket())
 
         pgt_info = yield self._fetch_ticket(pgt)
         if pgt_info is None:
@@ -559,7 +559,7 @@ class CouchDBTicketStore(object):
         try:
             tgt = pgt_info[u'tgt']
         except KeyError:
-            raise InvalidTicket("PGT '%s' is invalid." % pgt)
+            return defer.fail(InvalidTicket("PGT '%s' is invalid." % pgt))
         yield self._validService(service)
         pt = yield self._mkTicket('PT-', {
                 'avatar_id': pgt_info[u'avatar_id'],
