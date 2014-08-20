@@ -10,6 +10,11 @@ class CASError(Exception):
 class InvalidTicket(CASError):
     pass
 
+class InvalidTicketSpec(InvalidTicket):
+    pass
+
+class UnauthorizedServiceProxy(CASError):
+    pass
 
 class InvalidService(CASError):
     pass

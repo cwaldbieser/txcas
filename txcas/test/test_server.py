@@ -63,83 +63,196 @@ class FakeRequest(server.Request):
         self.redirected = where
 
 
-class InMemoryTicketStoreTest(TestCase):
+
+class TicketStoreTester(object):
     """
-    Test the in-memory ticket store.
+    Test a ticket store.
     """
-    def getStore(self):
+    
+    ticket_size = 256
+    service = "http://service.example.net/theservice"
+    proxied_service = "http://service.example.net/the/proxied/service"
+    pgturl = "http://service.example.net/pgtcallback"
+    avatar_id = "jane.smith"
+    
+    def setUp(self):
         self.clock = task.Clock()
-        store = InMemoryTicketStore(reactor=self.clock, verify_cert=False)
-        return store
-
-    def getService(self):
-        return "http://service.example.net/theservice"
-
-    def getAvatarId(self):
-        return "jane.smith"
+        store = self.getStore(self.clock)
+        store.ticket_size = self.ticket_size
+        self.store = store
+    
+    def getStore(self, clock):
+        """
+        Implement this to create and return a ticket store.
+        """
+        raise NotImplementedError()
 
     @defer.inlineCallbacks
-    def makeTicketGrantingCookie(self, store, avatar_id):
+    def makeTicketGrantingCookie(self):
         """
         Create a TGT. 
         """
-        ticket_size = store.ticket_size
-        service = self.getService()
-        tgt = yield store.mkTicketGrantingCookie(avatar_id)
+        tgt = yield self.store.mkTicketGrantingCookie(self.avatar_id)
         defer.returnValue(tgt)
+
+    @defer.inlineCallbacks
+    def makeProxyGrantingTicket(self):
+        """
+        Create a PGT. 
+        """
+        store = self.store
+        tgt = yield self.makeTicketGrantingCookie()
+        st = yield store.mkServiceTicket(self.service, tgt, False)
+        result = yield self.store.mkProxyGrantingTicket(
+                    self.service, 
+                    st, 
+                    tgt, 
+                    self.pgturl, 
+                    proxy_chain=None)
+        pgt = result['pgt']
+        iou = result['iou']
+        defer.returnValue((tgt, st, pgt, iou))
 
     @defer.inlineCallbacks
     def test_LoginTicket(self):
         """
         You can make and use login tickets
         """
-        store = self.getStore()
-        ticket_size = store.ticket_size
-        service = self.getService()
+        store = self.store
+        ticket_size = self.ticket_size
+        service = self.service
+        
+        # Create ticket.
         lt = yield store.mkLoginTicket(service)
-        yield store.useLoginTicket(lt, service)
         self.assertTrue(lt.startswith('LT-'))
-        self.assertEqual(len(lt), ticket_size)
-        self.assertFailure(store.useLoginTicket(lt, service), txcas.exceptions.InvalidTicket)
+        yield self.assertEqual(len(lt), ticket_size)
+        
+        # Use ticket.
+        yield store.useLoginTicket(lt, service)
+        
+        # Reusing ticket should fail.
+        yield self.assertFailure(store.useLoginTicket(lt, service), txcas.exceptions.InvalidTicket)
+        
+        # Using a bogus login ticket should fail.
+        bad_ticket = lt + 'x'
+        yield self.assertFailure(store.useLoginTicket(bad_ticket, service), txcas.exceptions.InvalidTicket)
+        
+        # A ticket that expired over time should also fail.
+        lt = yield store.mkLoginTicket(service)
+        self.clock.advance(store.lt_lifespan)
+        yield self.assertFailure(store.useLoginTicket(lt, service), txcas.exceptions.InvalidTicket)
 
     @defer.inlineCallbacks
     def test_ServiceTicket(self):
         """
-        You can make and use login tickets
+        Make and use service tickets
         """
-        store = self.getStore()
-        ticket_size = store.ticket_size
-        service = self.getService()
-        avatar_id = self.getAvatarId() 
-        tgt = yield self.makeTicketGrantingCookie(store, avatar_id)
+        store = self.store
+        ticket_size = self.ticket_size
+        service = self.service
+        avatar_id = self.avatar_id
+        
+        for validate_func in (store.useServiceTicket, store.useServiceOrProxyTicket):
+            # Create ST
+            tgt = yield self.makeTicketGrantingCookie()
+            st = yield store.mkServiceTicket(service, tgt, False)
+            yield self.assertTrue(st.startswith('ST-'))
+            yield self.assertEqual(len(st), ticket_size)
+            
+            # Validate ST.
+            result = yield validate_func(st, service)
+            stored_service = result['service']
+            stored_avatar_id = result['avatar_id']
+            stored_tgt = result['tgt']
+            self.assertTrue('primary_credentials' in result, 
+                    "ST result should have `primary_credentials` flag.")
+            yield self.assertEqual(stored_service, service, 
+                "Should return the service associated with the ticket during creation")
+            yield self.assertEqual(stored_avatar_id, avatar_id, 
+                "Should return the avatar_id associated with the ticket during creation")
+            yield self.assertEqual(stored_tgt, tgt, 
+                "Should return the tgt associated with the ticket during creation")
+
+        # Ticket should not be reusable.
+        yield self.assertFailure(store.useServiceTicket(st, service), txcas.exceptions.InvalidTicket)
+
+        # A phony ticket should fail.
+        yield self.assertFailure(store.useServiceTicket(st + 'x', service), txcas.exceptions.InvalidTicket)
+        
+        # A ticket that is allowed to expire should fail.
         st = yield store.mkServiceTicket(service, tgt, False)
-        result = yield store.useServiceTicket(st, service)
-        self.assertTrue(st.startswith('ST-'))
-        self.assertEqual(len(st), ticket_size)
+        self.clock.advance(store.st_lifespan)
+        yield self.assertFailure(store.useServiceTicket(st, service), txcas.exceptions.InvalidTicket)
+        
+        # TODO: Should fail if TGT expired.
+
+    @defer.inlineCallbacks
+    def test_ProxyTicket(self):
+        """
+        Make and use proxy tickets.
+        """
+        store = self.store
+        ticket_size = self.ticket_size
+        service = self.service
+        avatar_id = self.avatar_id
+        
+        # Create PT
+        tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
+        pt = yield store.mkProxyTicket(service, pgt)
+        yield self.assertTrue(pt.startswith('PT-'))
+        yield self.assertEqual(len(pt), ticket_size)
+        
+        # Validate PT.
+        result = yield store.useServiceOrProxyTicket(pt, service)
         stored_service = result['service']
         stored_avatar_id = result['avatar_id']
         stored_tgt = result['tgt']
-        self.assertTrue('primary_credentials' in result, 
+        stored_pgt = result['pgt']
+        stored_pgturl = result['pgturl']
+        stored_proxy_chain = result['proxy_chain']
+        yield self.assertTrue('primary_credentials' in result, 
                 "ST result should have `primary_credentials` flag.")
-        self.assertEqual(stored_service, service, 
+        yield self.assertEqual(stored_service, service, 
             "Should return the service associated with the ticket during creation")
-        self.assertEqual(stored_avatar_id, avatar_id, 
+        yield self.assertEqual(stored_avatar_id, avatar_id, 
             "Should return the avatar_id associated with the ticket during creation")
-        self.assertEqual(stored_tgt, tgt, 
+        yield self.assertEqual(stored_tgt, tgt, 
             "Should return the tgt associated with the ticket during creation")
+        yield self.assertEqual(stored_pgt, pgt, 
+            "Should return the pgt associated with the ticket during creation")
+        proxy_chain = [self.pgturl]
+        yield self.assertEqual(
+                stored_proxy_chain, 
+                proxy_chain, 
+                "Stored proxy chain '%s' != '%s'" % (str(stored_proxy_chain), str(proxy_chain)))
 
-        self.assertFailure(store.useServiceTicket(st, service), txcas.exceptions.InvalidTicket)
+        # Ticket should not be reusable.
+        yield self.assertFailure(store.useServiceOrProxyTicket(pt, service), txcas.exceptions.InvalidTicket)
 
-
+        # A phony ticket should fail.
+        yield self.assertFailure(store.useServiceOrProxyTicket(pt + 'x', service), txcas.exceptions.InvalidTicket)
+        
+        # A ticket that is allowed to expire should fail.
+        pt = yield store.mkProxyTicket(service, pgt)
+        self.clock.advance(store.pt_lifespan)
+        yield self.assertFailure(store.useServiceOrProxyTicket(pt, service), txcas.exceptions.InvalidTicket)
+        
+        # Should fail if /serviceValidate is used.
+        tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
+        pt = yield store.mkProxyTicket(service, pgt)
+          
+        yield self.assertFailure(store.useServiceTicket(pt, service), txcas.exceptions.InvalidTicket)
+        
+        # TODO: Should fail if TGT expired.
+        # TODO: Should fail if PGT expired.
+        
     @defer.inlineCallbacks
-    def test_mkTicket_expire(self):
-        store = self.getStore()
-        service = self.getService()
-        t = yield store.mkLoginTicket(service)
-        self.clock.advance(store.lt_lifespan)
-
-        self.assertFailure(store.useLoginTicket(t, service), txcas.exceptions.InvalidTicket)
-
+    def test_ProxyGrantingTicket(self):
+        raise NotImplementedError()
+        
+    @defer.inlineCallbacks
+    def test_TicketGrantingTicket(self):
+        raise NotImplementedError()
 
     #@defer.inlineCallbacks
     #def test_loginTicket_service(self):
@@ -229,7 +342,14 @@ class InMemoryTicketStoreTest(TestCase):
 #                        ' IUser: %r' % (avatar,))
 #        self.assertEqual(avatar.username, 'foo')
 
-
+class InMemoryTicketStoreTest(TicketStoreTester, TestCase):
+    """
+    """
+        
+    def getStore(self, clock):
+        store = InMemoryTicketStore(reactor=clock, verify_cert=False)
+        return store
+    
 
 #class ServerAppTest(TestCase):
 #

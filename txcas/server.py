@@ -15,7 +15,7 @@ from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         CookieAuthFailed, NotSSOService, NotHTTPSError, \
                         InvalidProxyCallback, ViewNotImplementedError, \
-                        BadRequestError
+                        BadRequestError, InvalidTicketSpec
 import txcas.http
 from txcas.interface import ICASUser, ITicketStore
 from txcas.utils import http_status_filter
@@ -760,7 +760,13 @@ class ServerApp(object):
         
         if service is None or ticket is None:
             request.setResponseCode(400)
-            return "Bad request"
+            return dedent("""\
+                <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+                   <cas:authenticationFailure code="INVALID_REQUEST">
+                      Missing parameters.
+                   </cas:authenticationFailure>
+                </cas:serviceResponse>
+                """)
         
         if renew != "":
             require_pc = True
@@ -838,19 +844,24 @@ class ServerApp(object):
             err.trap(InvalidTicket, InvalidProxyCallback, InvalidService)
             request.setResponseCode(403)
             code = "INVALID_TICKET"
-            if err.check(InvalidProxyCallback):
+            msg = "Validation failed for ticket '%s'." % ticket
+            if err.check(InvalidTicketSpec):
+                code = "INVALID_TICKET_SPEC"
+            elif err.check(InvalidProxyCallback):
                 code = "INVALID_PROXY_CALLBACK"
+                msg = "Invalid proxy callback."
             elif err.check(InvalidService):
                 code = "INVALID_SERVICE"
+                msg = "Invalid service."
             doc_fail = dedent("""\
                 <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
                    <cas:authenticationFailure code="%(code)s">
-                      Validation failed for ticket %(ticket)s.    
+                      %(msg)s.    
                    </cas:authenticationFailure>
                 </cas:serviceResponse>
                 """) % {
                     'code': xml_escape(code),
-                    'ticket': xml_escape(ticket),}
+                    'msg': xml_escape(msg),}
             return doc_fail
 
         d.addCallback(self._validateProxyUrl, pgturl, service, ticket, request)
@@ -951,8 +962,14 @@ class ServerApp(object):
         except BadRequestError as ex:
             log.err(ex)
             request.setResponseCode(400)
-            # Enhancement: page view
-            return "Bad Request"
+            return dedent("""\
+                <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+                    <cas:proxyFailure code="INVALID_REQUEST">
+                        Error requesting proxy ticket.       
+                        &apos;pgt&apos; and &apos;targetService&apos; parameters are both required exactly once.
+                    </cas:proxyFailure>
+                </cas:serviceResponse>
+                """)
         
         # Validate the PGT and get the PT
         def successResult(ticket, targetService, pgt, request):
@@ -976,13 +993,24 @@ class ServerApp(object):
                 ('PGT', pgt),])
             if not err.check(InvalidTicket, InvalidService):
                 log.err(err)
+            code = "INTERNAL_ERROR"
+            msg = "An internal error occured."
+            if err.check(InvalidTicket):
+                code = "BAD_PGT"
+                msg = "PGT '%s' is invalid." % pgt
+            elif err.check(InvalidService):
+                code = "INVALID_SERVICE"
+                msg = "Target service is not authorized."
             return dedent("""\
                 <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
-                    <cas:proxyFailure code="INVALID_REQUEST">
-                        Error requesting proxy ticket.       
+                    <cas:proxyFailure code="%(code)s">
+                        %(msg)s
                     </cas:proxyFailure>
                 </cas:serviceResponse>
-                """)
+                """) % {
+                    'code': xml_escape(code),
+                    'msg': xml_escape(msg),
+                }
 
         d = defer.maybeDeferred(self.ticket_store.mkProxyTicket, targetService, pgt)
         d.addCallback(successResult, targetService, pgt, request)

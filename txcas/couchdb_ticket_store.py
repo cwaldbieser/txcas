@@ -11,7 +11,7 @@ from xml.sax.saxutils import escape as xml_escape
 
 # Application modules
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
-                        NotSSOService
+                        NotSSOService, InvalidTicketSpec
 import txcas.http
 from txcas.interface import ITicketStore, ITicketStoreFactory
 import txcas.settings
@@ -539,6 +539,9 @@ class CouchDBTicketStore(object):
         """
         Get the data associated with a service ticket.
         """
+        if not ticket.startswith("ST-"):
+            return defer.fail(InvalidTicketSpec())
+
         return self._useServiceOrProxyTicket(ticket, service, requirePrimaryCredentials)
 
     @defer.inlineCallbacks
