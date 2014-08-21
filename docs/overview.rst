@@ -23,6 +23,7 @@ Features
   Ticket Stores (in-memory, CouchDB), Service Managers (JSON), and
   View Providers (Jinja2 templates).
 * Simple configuration.
+* Runs on a `Raspberry Pi`_!
 
 -----------------------
 Why Another CAS Server?
@@ -60,4 +61,5 @@ My goals for this project are as follows:
 .. _Twisted: https://twistedmatrix.com/trac/
 .. _Apereo Foundation: http://www.apereo.org/
 .. _Java programming language: https://www.java.com
+.. _Raspberry Pi: http://www.raspberrypi.org/
 

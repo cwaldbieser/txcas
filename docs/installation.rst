@@ -79,6 +79,29 @@ Missing external libraries is another common issue.  Sometimes it will be
 necessary to install the *devel* version of a library using your package
 manager so the header files are available to compile against.
 
+-------------------------
+|project| on Raspberry Pi
+-------------------------
+
+Since you made it this far, here is an interesting tidbit.  Using the
+above technique, I was able to install |project| on a `Raspberry Pi`_!
+Using the `Raspbian image`_ I installed the following system packages
+usinig :command:`apt-get install`:
+
+* python-dev
+* libffi-dev
+* python-virtualenv
+* virtualenvwrapper
+* vim
+* git
+* htop
+
+The first 2 were the only actual dependencies I needed to install.  The
+`python-virtualenv` and `virtualenvwrapper` packages are just for working
+with Python virtual environments (see above).  :program:`vim` is my editor
+of choice when working on a Pi, :program:`git` is needed to clone the |project|
+source, and :program:`htop` is just fun to watch once |project| is up and 
+running!
 
 **************************
 Create configuration files
@@ -161,3 +184,8 @@ after the `cas` subcommand, the program will output a list of options.
 .. _guide to virtual environments: http://docs.python-guide.org/en/latest/dev/virtualenvs/
 .. _pip: http://pip.readthedocs.org/en/latest/index.html
 .. _Python Package Index: https://pypi.python.org/pypi
+.. _Raspberry Pi: http://www.raspberrypi.org/
+.. _Raspbian image: http://www.raspberrypi.org/downloads/
+
+.. include:: placeholders.rst
+
