@@ -19,7 +19,8 @@ Glossary
         session, all CAS clients that authenticated via the session are
         notified of the session termination.
 
-        See http://www.jasig.org/cas/protocol#single-logout for details.
+        See https://github.com/Jasig/cas/blob/master/cas-server-protocol/3.0/cas_protocol_3_0.md#233-single-logout 
+        for details.
 
     SSO
         Single Sign-On.  The ability to login once to a service authentication 
