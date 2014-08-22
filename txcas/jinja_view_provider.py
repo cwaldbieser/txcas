@@ -112,7 +112,7 @@ class Jinja2ViewProvider(object):
         """
         service_manager = self.service_manager
         if service_manager is None:
-            return {}
+            return defer.succeed({})
         d = defer.maybeDeferred(service_manager.getMatchingService, service)
         return d
 
