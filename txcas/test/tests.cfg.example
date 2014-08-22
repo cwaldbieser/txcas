@@ -1,0 +1,13 @@
+
+[TESTS]
+couchdb_ticket_store = 0
+
+[CouchDB]
+host = 127.0.0.1
+port = 6984
+db = cas_tickets
+user = user
+passwd = password
+https = 1
+verify_cert = 0
+

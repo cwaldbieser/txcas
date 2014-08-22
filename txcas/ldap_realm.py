@@ -5,6 +5,7 @@ from textwrap import dedent
 import sys
 
 # Application module
+from txcas.casuser import User
 from txcas.interface import ICASUser, IRealmFactory
 
 # Application modules
@@ -51,20 +52,6 @@ def escape_filter_chars(assertion_value,escape_mode=0):
         s = s.replace(r')', r'\29')
         s = s.replace('\x00', r'\00')
     return s
-
-class User(object):
-
-    implements(ICASUser)
-
-    username = None
-    attribs = None
-    
-    def __init__(self, username, attribs):
-        self.username = username
-        self.attribs = attribs
-   
-    def logout(self):
-        pass 
 
 class LDAPRealmFactory(object):
     """

@@ -13,17 +13,23 @@ from xml.dom.minidom import parseString
 
 # Application modules
 from txcas.basic_realm import BasicRealm
+from txcas.casuser import User
+from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
+                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
 from txcas.couchdb_ticket_store import CouchDBTicketStore
 import txcas.exceptions
 from txcas.in_memory_ticket_store import InMemoryTicketStore
-from txcas.interface import ICASUser
+from txcas.interface import ICASUser, IServiceManager
+from txcas.jinja_view_provider import Jinja2ViewProvider
 from txcas.server import ServerApp 
 from txcas.settings import load_defaults, export_settings_to_dict
+
 
 # External modules
 from twisted.cred.portal import Portal, IRealm
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
 from twisted.internet import defer, task, reactor, utils, protocol
+from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath
 from twisted.trial.unittest import TestCase
 from twisted.web import server
@@ -73,7 +79,27 @@ class FakeRequest(server.Request):
     def redirect(self, where):
         self.redirected = where
 
+class FakeServiceManager(object):
+    implements(IServiceManager)
 
+    def getMatchingService(self, service):
+        """
+        Return the entry for the first matching service or None.
+        """
+        return defer.succeed({'name': service})
+
+    def isValidService(self, service):
+        """
+        Returns True if the service is valid; False otherwise.
+        """
+        return defer.succeed(True)
+
+    def isSSOService(self, service):
+        """
+        Returns True if the service participates in SSO.
+        Returns False if the service will only accept primary credentials.
+        """
+        return defer.succeed(True)
 
 class TicketStoreTester(object):
     """
@@ -551,6 +577,77 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
                     verify_cert=self.verify_cert)
         return store
 
+class Jinja2ViewProviderTest(TestCase):
+    """
+    """
+    view_types = [VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, 
+                VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, 
+                VIEW_NOT_FOUND,]
+    view_args = {
+        VIEW_LOGIN: ['LT-xyzzy', 'http://service.example.net/service', False, FakeRequest()],
+        VIEW_LOGIN_SUCCESS: [User('jane.smith', []), FakeRequest()],
+        VIEW_LOGOUT: [FakeRequest()],
+        VIEW_INVALID_SERVICE: ['http://service.example.net/service', FakeRequest()],
+        VIEW_ERROR_5XX: [Failure(Exception("A failure")), FakeRequest()],
+        VIEW_NOT_FOUND: [FakeRequest()],
+    }
+
+    service_manager = None
+
+    def setUp(self):
+        """
+        """
+        path = os.path.join(os.path.dirname(__file__), 'test_jinja2_templates')
+        self.view_provider = Jinja2ViewProvider(path)
+        self.view_provider.service_manager = self.service_manager
+
+    def tearDown(self):
+        """
+        """
+        pass
+
+    @defer.inlineCallbacks
+    def test_provideView(self):
+        """
+        """
+        view_types = self.view_types
+        view_provider = self.view_provider
+        for view_type in view_types:
+            result = yield view_provider.provideView(view_type)
+            self.assertIsNot(result, None)
+
+    @defer.inlineCallbacks
+    def _tst_view_provider(self, view_type):
+        view_func = yield self.view_provider.provideView(view_type)
+        args = self.view_args[view_type]
+        out = yield view_func(*args)
+
+    @defer.inlineCallbacks
+    def test_login(self):
+        yield self._tst_view_provider(VIEW_LOGIN)
+        
+    @defer.inlineCallbacks
+    def test_login_success(self):
+        yield self._tst_view_provider(VIEW_LOGIN_SUCCESS)
+
+    @defer.inlineCallbacks
+    def test_logout(self):
+        yield self._tst_view_provider(VIEW_LOGOUT)
+
+    @defer.inlineCallbacks
+    def test_invalid_service(self):
+        yield self._tst_view_provider(VIEW_INVALID_SERVICE)
+
+    @defer.inlineCallbacks
+    def test_error_5xx(self):
+        yield self._tst_view_provider(VIEW_ERROR_5XX)
+
+    @defer.inlineCallbacks
+    def test_not_found(self):
+        yield self._tst_view_provider(VIEW_NOT_FOUND)
+
+class Jinja2ViewProviderWithServiceManagerTest(Jinja2ViewProviderTest):
+    service_manager = FakeServiceManager()
 
 #class ServerAppTest(TestCase):
 #

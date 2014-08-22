@@ -3,6 +3,7 @@
 from textwrap import dedent
 
 # Application module
+from txcas.casuser import User
 from txcas.interface import ICASUser, IRealmFactory
 
 # External module
@@ -11,19 +12,6 @@ from twisted.internet import defer
 from twisted.plugin import IPlugin
 from zope.interface import implements
 
-class User(object):
-
-    implements(ICASUser)
-
-    username = None
-    attribs = None
-    
-    def __init__(self, username, attribs):
-        self.username = username
-        self.attribs = attribs
-   
-    def logout(self):
-        pass 
 
 class BasicRealmFactory(object):
     """
