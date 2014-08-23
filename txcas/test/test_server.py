@@ -649,23 +649,22 @@ class Jinja2ViewProviderTest(TestCase):
 class Jinja2ViewProviderWithServiceManagerTest(Jinja2ViewProviderTest):
     service_manager = FakeServiceManager()
 
-#class ServerAppTest(TestCase):
-#
-#
-#    def test_init(self):
-#        """
-#        It should accept a UserStore on init
-#        """
-#        checker = InMemoryUsernamePasswordDatabaseDontUse()
-#        realm = UserRealm()
-#
-#        app = ServerApp(None, realm, [checker], 'services')
-#        self.assertEqual(app.ticket_store, None)
-#        self.assertEqual(app.portal.realm, realm)
-#        self.assertIn(checker, app.portal.checkers.values())
-#        self.assertEqual(app.validService, 'services')
-#
-#
+class ServerAppTest(TestCase):
+
+    def test_init(self):
+        """
+        """
+        checker = InMemoryUsernamePasswordDatabaseDontUse()
+        realm = BasicRealm()
+        ticket_store = InMemoryTicketStore()
+
+        app = ServerApp(ticket_store, realm, [checker], 'services')
+        self.assertIs(app.ticket_store, ticket_store)
+        self.assertEqual(app.portal.realm, realm)
+        self.assertIn(checker, app.portal.checkers.values())
+        self.assertEqual(app.validService, 'services')
+
+
 
 #class FunctionalTest(TestCase):
 #
