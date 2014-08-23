@@ -71,47 +71,62 @@ For more information on writing Twisted plugins, see `Writing a twistd Plugin`_
 ----------------
 Kinds of Plugins
 ----------------
-Credential checkers and `user realms`_ are are components of `Twisted Cred`_,
+All unqualified interface references below are understood to belong to the
+`txcas.interface` module.
+
+**Credential checkers** and **user realms** are are components of `Twisted Cred`_,
 Twisted's pluggable authentication system.  Credential checkers authenticate
 credentials presented.  User realms create :term:`avatar` s for authenticated
-users.  Currently, |project| supports credential checkers that support 
-`IUsernamePassword`_ credentials.
+users.  Currently, |project| supports credential checkers that consume credentials
+that implement the `twisted.cred.credentials.IUsernamePassword`_ interface.  
 
-Ticket stores manage the tickets used by CAS.  They track ticket lifetimes, validate
-them, and expire them.  Ticket stores may need to work with service managers to 
-determine if a ticket ought to be created for a service provider, or if a service
-provider participates in :term:`SSO`.
+Credential checker factories should implement the `twisted.cred.strcred.ICheckerFactory`_ 
+interface.  Credential checkers should implement the `twisted.cred.checkers.ICredentialsChecker`_
+interface.  User realm factories should implement the `IRealmFactory` interface.  
+User realms should implement the `twisted.cred.portal.IRealm`_ interface. Avatars 
+produced by a realm should implement the `ICASUser` interface.
 
-Service managers are used to decide whether a service provider is allowed to 
+**Ticket stores** manage the tickets used by CAS.  They track ticket lifetimes, 
+validate them, and expire them.  Ticket stores may need to work with *service 
+managers* to determine if a ticket ought to be created for a service provider, 
+or if a service provider participates in :term:`SSO`.
+
+Ticket store factories should implement the `ITicketStoreFactory` interface.
+Ticket stores should implement `ITicketStore`.
+
+**Service managers** are used to decide whether a service provider is allowed to 
 authenticate with a particular |project| instance, and whether or not a service 
 provider will participate in :term:`SSO`.  Without a service manager, |project| runs
 "open", meaning that **any** service provider may authenticate with it.
 
-Service managers may also provide additional service entry meta-data to view 
-providers.  This meta-data may be used to customize the view in specific 
-situations (e.g. informing the user what service she is about to log into).
+Service manager factories should implement `IServiceManagerFactory`.
+Service managers should implement `IServiceManager`.
 
-View providers are used to customize the web pages presented by the |project|
-service.  This kind of customization makes it possible to preserve an overall
-theme or appearance with the services that |project| protects.
+Service managers may also provide additional service entry meta-data that 
+other plugins can use.  This meta-data may be used to customize views or 
+activate decision making logic in other components (e.g. the attributes 
+included in a realm could be tailored to specific services).
+If a plugin wants to receive a reference to the service manager, it should
+implement the `IServiceManagerAcceptor` interface. 
 
-***********
-User Realms
-***********        
+**View providers** are used to customize the web pages presented by the |project|
+service.  This kind of customization makes it possible to present a specific
+theme or appearance that meshes with an organizational web site.
 
-User realms in |project| must ultimately produce an :term:`avatar`.  |project|
-expects the avatar to be an instance of a class that implements the :py:class:`ICASUser`
-interface.  The avatar should have both `username` and `attribs` properties.
-If the avatar has no attributes, then `attribs` should be an empty list.
-
+View provider factories should implement `IViewProviderFactory`.  View providers
+should implement `IViewProvider`.  A view provider's :py:meth:`provideView`
+method should return a callable if it provides a particular view or `None`
+if it does not.
 
 
 
 .. _Twisted Plugin System: http://twistedmatrix.com/documents/current/core/howto/plugin.html
 .. _Writing a twistd Plugin: https://twistedmatrix.com/documents/current/core/howto/tap.html
 .. _Twisted Cred: https://twistedmatrix.com/documents/current/core/howto/cred.html
-.. _IUsernamePassword: https://twistedmatrix.com/documents/current/api/twisted.cred.credentials.IUsernamePassword.html
-
+.. _twisted.cred.strcred.ICheckerFactory: https://twistedmatrix.com/documents/current/api/twisted.cred.strcred.ICheckerFactory.html
+.. _twisted.cred.checkers.ICredentialsChecker: https://twistedmatrix.com/documents/current/api/twisted.cred.checkers.ICredentialsChecker.html
+.. _twisted.cred.portal.IRealm: https://twistedmatrix.com/documents/current/api/twisted.cred.portal.IRealm.html
+.. _twisted.cred.credentials.IUsernamePassword: https://twistedmatrix.com/documents/current/api/twisted.cred.credentials.IUsernamePassword.html
 
 .. include:: placeholders.rst
 

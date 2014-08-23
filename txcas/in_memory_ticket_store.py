@@ -12,7 +12,8 @@ from xml.sax.saxutils import escape as xml_escape
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         NotSSOService, InvalidTicketSpec
 import txcas.http
-from txcas.interface import ITicketStore, ITicketStoreFactory
+from txcas.interface import ITicketStore, ITicketStoreFactory, \
+                            IServiceManagerAcceptor
 import txcas.settings
 
 # External modules
@@ -87,7 +88,7 @@ class InMemoryTicketStore(object):
     """
     A ticket store that exists entirely in system memory.
     """
-    implements(IPlugin, ITicketStore)
+    implements(IPlugin, ITicketStore, IServiceManagerAcceptor)
 
     lt_lifespan = 60 * 5
     st_lifespan = 10

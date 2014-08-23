@@ -6,7 +6,8 @@ import sys
 from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
                         VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
 from txcas.interface import IRealmFactory, IServiceManagerFactory, \
-                        ITicketStoreFactory, IViewProviderFactory
+                        ITicketStoreFactory, IViewProviderFactory, \
+                        IServiceManagerAcceptor
 from txcas.server import ServerApp
 import txcas.settings
 
@@ -70,21 +71,6 @@ class CASService(Service):
                     'realm': 'basic_realm',
                     'ticket_store': 'memory_ticket_store'}})
 
-        # Choose plugin that implements IViewProvider.
-        if view_provider is None and scp.has_option('PLUGINS', 'view_provider'):
-            tag_args = scp.get('PLUGINS', 'view_provider')
-            parts = tag_args.split(':')
-            tag = parts[0]
-            args = ':'.join(parts[1:])
-            factory = txcas.settings.get_plugin_factory(tag, IViewProviderFactory)
-            if factory is None:
-                sys.stderr.write("[ERROR] View provider type '%s' is not available.\n" % tag)
-                sys.exit(1)
-            view_provider = factory.generateViewProvider(args)
-
-        if view_provider is not None:
-            sys.stderr.write("[CONFIG] View provider: %s\n" % view_provider.__class__.__name__)
-
         # Choose plugin that implements IServiceManager.
         if service_manager is None and scp.has_option('PLUGINS', 'service_manager'):
             tag_args = scp.get('PLUGINS', 'service_manager')
@@ -100,8 +86,25 @@ class CASService(Service):
         if service_manager is not None:
             sys.stderr.write("[CONFIG] Service manager: %s\n" % service_manager.__class__.__name__)
 
-        if service_manager is not None and view_provider is not None:
+        # Choose plugin that implements IViewProvider.
+        if view_provider is None and scp.has_option('PLUGINS', 'view_provider'):
+            tag_args = scp.get('PLUGINS', 'view_provider')
+            parts = tag_args.split(':')
+            tag = parts[0]
+            args = ':'.join(parts[1:])
+            factory = txcas.settings.get_plugin_factory(tag, IViewProviderFactory)
+            if factory is None:
+                sys.stderr.write("[ERROR] View provider type '%s' is not available.\n" % tag)
+                sys.exit(1)
+            view_provider = factory.generateViewProvider(args)
+        
+        if view_provider is not None:
+            sys.stderr.write("[CONFIG] View provider: %s\n" % view_provider.__class__.__name__)
+        
+        # Connect service manager, if available.
+        if IServiceManagerAcceptor.providedBy(view_provider):
             view_provider.service_manager = service_manager
+            sys.stderr.write("[CONFIG] View provider received a reference to the service manager.\n")
 
         # Choose plugin that implements ITicketStore.
         if ticket_store is None:
@@ -116,12 +119,12 @@ class CASService(Service):
             ticket_store = factory.generateTicketStore(args)
 
         assert ticket_store is not None, "Ticket store has not been configured!"
-        
         sys.stderr.write("[CONFIG] Ticket store: %s\n" % ticket_store.__class__.__name__)
 
-        # Attach service manager to ticket store.
-        if service_manager is not None:
+        # Connect service manager, if available.
+        if IServiceManagerAcceptor.providedBy(ticket_store):
             ticket_store.service_manager = service_manager
+            sys.stderr.write("[CONFIG] Ticket store received a reference to the service manager.\n")
    
         # Choose plugin(s) that implement ICredentialChecker 
         if checkers is None:        
@@ -143,6 +146,10 @@ class CASService(Service):
 
         for checker in checkers:
             sys.stderr.write("[CONFIG] Credential Checker: %s\n" % checker.__class__.__name__)
+            # Connect service manager, if available.
+            if IServiceManagerAcceptor.providedBy(checker):
+                checker.service_manager = service_manager
+                sys.stderr.write("[CONFIG] Credential checker received a reference to the service manager.\n")
 
         # Choose the plugin that implements IRealm.
         if realm is None:
@@ -158,6 +165,11 @@ class CASService(Service):
 
         assert realm is not None, "User Realm has not been configured!"
         sys.stderr.write("[CONFIG] User Realm: %s\n" % realm.__class__.__name__)
+        
+        # Connect service manager, if available.
+        if IServiceManagerAcceptor.providedBy(realm):
+            realm.service_manager = service_manager
+            sys.stderr.write("[CONFIG] User realm received a reference to the service manager.\n")
        
         # Page views
         page_views = None

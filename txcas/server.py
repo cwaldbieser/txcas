@@ -485,7 +485,8 @@ class ServerApp(object):
             d.addCallback(redirect, service, request)
         else:
             d.addCallback(replace_result, avatar_id)
-            d.addCallback(self.realm.requestAvatar, None, ICASUser)
+            mind = {'service': ""}
+            d.addCallback(self.realm.requestAvatar, mind, ICASUser)
             d.addCallback(extract_avatar)
             d.addCallback(self._page_view_result_callback, VIEW_LOGIN_SUCCESS, request)
             
@@ -599,9 +600,10 @@ class ServerApp(object):
         password = get_single_param_or_default(request, 'password', None)
         ticket = get_single_param_or_default(request, 'lt', None)
 
-        def checkPassword(_, username, password):
+        def checkPassword(_, username, password, service):
             credentials = UsernamePassword(username, password)
-            return self.portal.login(credentials, None, ICASUser)
+            mind = {'service': service}
+            return self.portal.login(credentials, mind, ICASUser)
 
         def log_auth_failed(err, username, request):
             err.trap(Unauthorized)
@@ -629,7 +631,7 @@ class ServerApp(object):
 
         # check credentials
         d = self.ticket_store.useLoginTicket(ticket, service)
-        d.addCallback(checkPassword, username, password)
+        d.addCallback(checkPassword, username, password, service)
         d.addErrback(log_auth_failed, username, request)
         d.addCallback(log_authentication, username, request)
         d.addCallback(inject_avatar_id, username)
@@ -720,7 +722,8 @@ class ServerApp(object):
                 log_cas_event("Validated service ticket (/validate)", attribs)
                 return 'yes\n' + avatarAspect.username + '\n'
             
-            return self.realm.requestAvatar(avatar_id, None, ICASUser).addCallback(
+            mind = {'service': service}
+            return self.realm.requestAvatar(avatar_id, mind, ICASUser).addCallback(
                 successResult, data, ticket, service, request)
             
         def renderFailure(err, ticket, service, request):
@@ -778,7 +781,7 @@ class ServerApp(object):
         else:
             d = self.ticket_store.useServiceTicket(ticket, service, require_pc)
 
-        def getAvatar(ticket_data):
+        def getAvatar(ticket_data, service):
             def avatarResult(result, ticket_data):
                 """
                 Append the avatarAspect to the ticket data.
@@ -786,7 +789,8 @@ class ServerApp(object):
                 iface, avatarAspect, logout = result
                 ticket_data['avatar'] = avatarAspect
                 return ticket_data
-            return self.realm.requestAvatar(ticket_data['avatar_id'], None, ICASUser).addCallback(
+            mind = {'service': service}
+            return self.realm.requestAvatar(ticket_data['avatar_id'], mind, ICASUser).addCallback(
                 avatarResult, ticket_data) 
 
         def renderSuccess(results, ticket, request):
@@ -865,7 +869,7 @@ class ServerApp(object):
             return doc_fail
 
         d.addCallback(self._validateProxyUrl, pgturl, service, ticket, request)
-        d.addCallback(getAvatar)
+        d.addCallback(getAvatar, service)
         d.addCallback(renderSuccess, ticket, request)
         d.addErrback(renderFailure, ticket, request)
         d.addErrback(self._log_failure_filter, request)

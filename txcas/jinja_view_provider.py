@@ -11,7 +11,8 @@ import urlparse
 from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
                         VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
 from txcas.exceptions import ViewNotImplementedError
-from txcas.interface import IViewProvider, IViewProviderFactory
+from txcas.interface import IViewProvider, IViewProviderFactory, \
+                        IServiceManagerAcceptor
 import txcas.settings
 
 # External modules
@@ -70,7 +71,7 @@ class Jinja2ViewProvider(object):
     """
     A view provider based on Jinja2 templates.
     """
-    implements(IViewProvider)
+    implements(IViewProvider, IServiceManagerAcceptor)
 
     service_manager = None
 

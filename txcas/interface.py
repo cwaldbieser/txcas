@@ -9,6 +9,10 @@ class ICASUser(Interface):
     username = Attribute('String username')
     attribs = Attribute('List of (attribute, value) tuples.')
 
+class IServiceManagerAcceptor(Interface):
+    
+    service_manager = Attribute('None or a reference to the current service manager plugin.')
+
 class IRealmFactory(Interface):
 
     tag = Attribute('String used to identify the plugin factory.')
@@ -61,8 +65,6 @@ class IViewProviderFactory(Interface):
         """
 
 class IViewProvider(Interface):
-
-    service_manager = Attribute('None or an object that implements IServiceManager.')
 
     def provideView(view_type):
         """

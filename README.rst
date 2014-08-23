@@ -27,7 +27,7 @@ Features
 Running the Demonstration
 -------------------------
 
-Run the :program:`sample.py` script as follows::
+Run the `sample.py` script as follows::
 
     $ python sample.py
 
@@ -64,9 +64,10 @@ To get a list of all command line options::
 Appearance
 ----------
 The HTML pages presented by txcas are fully customizable via view provider
-plugins.  The included Jinja2_ view provider allows you to design pages
+plugins.  The included Jinja2 view provider allows you to design pages
 using powerful yet easy to use Jinja2 templates (see 
 http://jinja.pocoo.org/docs/templates/).
 
 A sample theme using Bootstrap 3 is available at 
 https://github.com/cwaldbieser/txcas_extras.
+

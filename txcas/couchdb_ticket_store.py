@@ -13,7 +13,8 @@ from xml.sax.saxutils import escape as xml_escape
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         NotSSOService, InvalidTicketSpec
 import txcas.http
-from txcas.interface import ITicketStore, ITicketStoreFactory
+from txcas.interface import ITicketStore, ITicketStoreFactory, \
+                            IServiceManagerAcceptor
 import txcas.settings
 from txcas.utils import http_status_filter
 
@@ -125,7 +126,7 @@ class CouchDBTicketStore(object):
     """
     A ticket store that uses an external CouchDB.
     """
-    implements(IPlugin, ITicketStore)
+    implements(IPlugin, ITicketStore, IServiceManagerAcceptor)
 
     lt_lifespan = 60*5
     st_lifespan = 10

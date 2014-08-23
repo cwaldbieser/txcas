@@ -6,7 +6,7 @@ import sys
 
 # Application module
 from txcas.casuser import User
-from txcas.interface import ICASUser, IRealmFactory
+from txcas.interface import ICASUser, IRealmFactory, IServiceManagerAcceptor
 
 # Application modules
 import txcas.settings
@@ -83,7 +83,10 @@ class LDAPRealmFactory(object):
         """
         scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
         settings = txcas.settings.export_settings_to_dict(scp)
-        ldap_settings = settings.get('LDAP', {})    
+        ldap_settings = settings.get('LDAP', {})  
+        temp = settings.get("LDAPRealm", {})
+        ldap_settings.update(temp)
+        del temp  
         if argstring.strip() != "":
             argdict = dict((x.split('=') for x in argstring.split(':')))
             ldap_settings.update(argdict)
@@ -99,7 +102,14 @@ class LDAPRealmFactory(object):
             attribs = ldap_settings['attribs']
             attribs = attribs.split(',')
             ldap_settings['attribs'] = attribs
-
+        if 'aliases' in ldap_settings:
+            aliases = ldap_settings['aliases']
+            aliases = aliases.split(',')
+            ldap_settings['aliases'] = aliases
+        if 'port' in ldap_settings:
+            ldap_settings['port'] = int(ldap_settings['port'])
+        if 'service_based_attribs' in ldap_settings:
+            ldap_settings['service_based_attribs'] = bool(int(ldap_settings['service_based_attribs']))
         txcas.utils.filter_args(LDAPRealm.__init__, ldap_settings, ['self'])
         buf = ["[CONFIG][LDAPRealm] Settings:"]
         for k in sorted(ldap_settings.keys()):
@@ -115,11 +125,23 @@ class LDAPRealmFactory(object):
 class LDAPRealm(object):
 
 
-    implements(IRealm)
+    implements(IRealm, IServiceManagerAcceptor)
     
-    def __init__(self, host, port, basedn, binddn, bindpw, query_template='(uid=%(username)s)', attribs=None):
+    service_manager = None
+    
+    def __init__(self, host, port, basedn, binddn, bindpw, 
+                query_template='(uid=%(username)s)', 
+                attribs=None, 
+                aliases=None,
+                service_based_attribs=False):
         if attribs is None:
             attribs = []
+        # Turn attribs into mapping of attrib_name => alias.
+        if aliases is not None:
+            assert len(aliases) == len(attribs), "[ERROR][LDAP REALM] Number of aliases must match number of attribs."
+            attribs = dict(x for x in zip(attribs, aliases))
+        else:
+            attribs = dict((k,k) for k in attribs)
         self._attribs = attribs
         self._host = host
         self._port = port
@@ -127,26 +149,42 @@ class LDAPRealm(object):
         self._binddn = binddn
         self._bindpw = bindpw
         self._query_template = query_template
+        self._service_based_attribs = service_based_attribs
 
     def requestAvatar(self, avatarId, mind, *interfaces):
         """
         """
-            
         def cb(avatar):
             if not ICASUser in interfaces:
                 raise NotImplementedError("This realm only implements ICASUser.")
             return (ICASUser, avatar, avatar.logout)
             
-        d = self._get_avatar(avatarId)
+        d = self._get_avatar(avatarId, mind)
         return d.addCallback(cb)
         
     @defer.inlineCallbacks
-    def _get_avatar(self, avatarId):
+    def _get_avatar(self, avatarId, mind):
         serverip = self._host
         basedn = self._basedn
         binddn = self._binddn
         bindpw = self._bindpw
         query = self._query_template % {'username': escape_filter_chars(avatarId)}
+        
+        if self._service_based_attribs:
+            if mind:
+                service = mind['service']
+            else:
+                service = ""
+            if service == "" or service is None or self.service_manager is None:
+                attributes = self._attribs
+            else:
+                service_entry = yield defer.maybeDeferred(self.service_manager.getMatchingService, service)
+                if service_entry and 'attributes' in service_entry:
+                    attributes = service_entry['attributes']
+                else:
+                    attributes = self._attribs
+        else:
+            attributes = self._attribs
 
         c = ldapconnector.LDAPClientCreator(reactor, ldapclient.LDAPClient)
         overrides = {basedn: (serverip, self._port)}
@@ -154,17 +192,17 @@ class LDAPRealm(object):
         client = yield client.startTLS()        
         yield client.bind(binddn, bindpw)
         o = ldapsyntax.LDAPEntry(client, basedn)
-        results = yield o.search(filterText=query, attributes=self._attribs)
+        results = yield o.search(filterText=query, attributes=attributes.keys())
         if len(results) != 1:
             raise Exception("No unique account found for '%s'." % avatarId)
         entry = results[0]
-        _attribs = self._attribs
+        _attribs = attributes
         attribs = []
-        for key in _attribs:
+        for key, alias in _attribs.iteritems():
             if key in entry:
                 valuelist = entry[key]
                 for value in valuelist:
-                    attribs.append((key, value))
+                    attribs.append((alias, value))
         user = User(avatarId, attribs)
         defer.returnValue(user)
         
