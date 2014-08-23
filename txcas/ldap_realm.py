@@ -74,6 +74,9 @@ class LDAPRealmFactory(object):
               The %(username)s part will be interpolated with the (escaped)
               avatar ID.
             - attribs: A comma-separated list of attributes.
+            - aliases: A comma-separated list of aliases.
+            - service_based_attribs: Use attributes/aliases from service
+              registry entry (found under key 'attributes'.
             ''')
 
     opt_usage = '''A colon-separated key=value list.'''

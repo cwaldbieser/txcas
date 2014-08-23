@@ -58,6 +58,17 @@ The realm options included in txcas are:
     reason.
   * :option:`attribs`: A comma separated list of attributes that the realm
     should attempt to populate during avatar generation.
+  * :option:`aliases`: A comma separated list of aliases that is the same 
+    length as the :option:`attribs` option.  Each attribute fetched will
+    be mapped to the alias name indicated.
+  * :option:`service_based_attribs`: 1 (Tue) or 0 (False).  Defaults to False.
+    If this option is selected *and* a service manager plugin is used, the
+    service entry for the current service will be used to look up a list
+    of attributes or a mapping of attributes-to-aliases.  Whether a list or
+    a mapping, the data should be located under the **attributes** key of the
+    service registry entry.  If that key is not present for a particular entry
+    the :option:`attribs` and :option:`aliases` options above will be used to
+    compute the attributes to add to the realm.
 
 If you have added additional plugins to your :file:`$TXCAS/twisted/plugins` 
 folder, additional option values may be available.  The plugin documentation 
