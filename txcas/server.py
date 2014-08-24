@@ -612,7 +612,6 @@ class ServerApp(object):
             client_ip = request.getClientIP()
             log_cas_event("Failed to authenticate using primary credentials", [
                         ('client_ip', client_ip), ('username', username)])
-            
             return err
 
         def log_authentication(result, username, request):

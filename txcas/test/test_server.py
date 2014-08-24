@@ -675,7 +675,7 @@ class ServerAppTest(TestCase):
 class FunctionalTest(TestCase):
 
     timeout = 3
-
+    service = 'http://www.example.com/service'
 
     def setUp(self):
         checker = InMemoryUsernamePasswordDatabaseDontUse(foo='something')
@@ -702,17 +702,13 @@ class FunctionalTest(TestCase):
             }
         return ret
 
-
     @defer.inlineCallbacks
-    def _setup_for_validation(self):
-        """
-        You can log in and validate tickets
-        """
+    def _getLoginTicket(self):
         app = self.app
 
         # GET /login
         request = FakeRequest(args={
-            'service': ['http://www.example.com'],
+            'service': [self.service],
         })
 
         body = yield self.app.login_GET(request)
@@ -730,19 +726,28 @@ class FunctionalTest(TestCase):
         self.assertIn(('username', '', 'text'), inputs)
         self.assertIn(('password', '', 'password'), inputs)
         self.assertIn(('lt', lt_value, 'hidden'), inputs)
-        self.assertIn(('service', 'http://www.example.com', 'hidden'), inputs)
+        self.assertIn(('service', self.service, 'hidden'), inputs)
+
+        defer.returnValue(lt_value)
+
+    @defer.inlineCallbacks
+    def _setup_for_validation(self):
+        """
+        You can log in and validate tickets
+        """
+        lt_value = yield self._getLoginTicket()
 
         # POST /login
         request = FakeRequest(args={
             'username': ['foo'],
             'password': ['something'],
             'lt': [lt_value],
-            'service': ['http://www.example.com'],
+            'service': [self.service],
         })
 
         body = yield self.app.login_POST(request)
         redirect_url = request.redirected
-        self.assertTrue(redirect_url.startswith('http://www.example.com'),
+        self.assertTrue(redirect_url.startswith(self.service),
                         redirect_url)
         parsed = urlparse(redirect_url)
         qs = parse_qs(parsed.query)
@@ -759,7 +764,7 @@ class FunctionalTest(TestCase):
          
         # GET /validate
         request = FakeRequest(args={
-            'service': ['http://www.example.com'],
+            'service': [self.service],
             'ticket': [ticket],
         })
 
@@ -773,7 +778,7 @@ class FunctionalTest(TestCase):
          
         # GET /serviceValidate
         request = FakeRequest(args={
-            'service': ['http://www.example.com'],
+            'service': [self.service],
             'ticket': [ticket],
         })
 
@@ -804,52 +809,39 @@ class FunctionalTest(TestCase):
         The user's password has to match
         """
         app = self.app
-
-        # GET
-        request = FakeRequest(args={
-            'service': ['http://www.example.com'],
-        })
-
-        body = yield self.app.login_GET(request)
-        inputs = self.getInputs(body)
+        lt = yield self._getLoginTicket()
 
         # POST with wrong password
         request = FakeRequest(args={
             'username': ['foo'],
             'password': ['bad password'],
-            'lt': [inputs['lt']['value']],
-            'service': [inputs['service']['value']],
+            'lt': [lt],
+            'service': [self.service],
         })
         body = yield self.app.login_POST(request)
 
         self.assertEqual(request.responseCode, 403, "Should be forbidden")
 
-#
-#
-#    @defer.inlineCallbacks
-#    def test_login_badservice(self):
-#        """
-#        If the service provided in POST doesn't match that in GET, then fail.
-#        """
-#        app = self.app
-#        request = FakeRequest(args={
-#            'service': ['foo'],
-#        })
-#
-#        body = yield self.app.login_GET(request)
-#        inputs = self.getInputs(body)
-#
-#        # POST with wrong service
-#        request = FakeRequest(args={
-#            'username': ['foo'],
-#            'password': ['something'],
-#            'lt': [inputs['lt']['value']],
-#            'service': ['different service'],
-#        })
-#        body = yield self.app.login_POST(request)
-#
-#        self.assertEqual(request.responseCode, 403)
-#
+
+    @defer.inlineCallbacks
+    def test_login_badservice(self):
+        """
+        If the service provided in POST doesn't match that in GET, then fail.
+        """
+        app = self.app
+        lt = yield self._getLoginTicket()
+
+        # POST with wrong service
+        request = FakeRequest(args={
+            'username': ['foo'],
+            'password': ['something'],
+            'lt': [lt],
+            'service': ['different service'],
+        })
+        body = yield self.app.login_POST(request)
+        errors = self.flushLoggedErrors(txcas.exceptions.InvalidService, txcas.exceptions.InvalidTicket)
+        self.assertEqual(request.responseCode, 403)
+
 #
 #    @defer.inlineCallbacks
 #    def test_validate_badservice(self):
