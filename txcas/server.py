@@ -733,7 +733,7 @@ class ServerApp(object):
                 ('client_ip', request.getClientIP()),
                 ('ticket', ticket),
                 ('service', service),])
-            err.trap(InvalidTicket)
+            err.trap(InvalidTicket, InvalidService, Unauthorized)
             request.setResponseCode(403)
             return 'no\n\n'
 

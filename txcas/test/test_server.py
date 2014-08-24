@@ -842,44 +842,26 @@ class FunctionalTest(TestCase):
         errors = self.flushLoggedErrors(txcas.exceptions.InvalidService)
         self.assertEqual(request.responseCode, 403)
 
-#
-#    @defer.inlineCallbacks
-#    def test_validate_badservice(self):
-#        """
-#        If the service provided to /validate doesn't match the service provided
-#        to /login then fail the validation.
-#        """
-#        app = self.app
-#        request = FakeRequest(args={
-#            'service': ['foo'],
-#        })
-#
-#        body = yield self.app.login_GET(request)
-#        inputs = self.getInputs(body)
-#
-#        # POST
-#        request = FakeRequest(args={
-#            'username': ['foo'],
-#            'password': ['something'],
-#            'lt': [inputs['lt']['value']],
-#            'service': ['foo'],
-#        })
-#        body = yield self.app.login_POST(request)
-#        redirect_url = request.redirected
-#        parsed = urlparse(redirect_url)
-#        qs = parse_qs(parsed.query)
-#        ticket = qs['ticket'][0]
-#        
-#        # GET /validate with wrong service
-#        request = FakeRequest(args={
-#            'ticket': [ticket],
-#            'service': ['different'],
-#        })
-#
-#        body = yield self.app.validate_GET(request)
-#        self.assertEqual(request.responseCode, 403)
-#        self.assertEqual(body, 'no\n\n')
-#
+
+    @defer.inlineCallbacks
+    def test_validate_badservice(self):
+        """
+        If the service provided to /validate doesn't match the service provided
+        to /login then fail the validation.
+        """
+        app = self.app
+        ticket = yield self._setup_for_validation()
+
+        # GET /validate with wrong service
+        request = FakeRequest(args={
+            'ticket': [ticket],
+            'service': ['different'],
+        })
+
+        body = yield self.app.validate_GET(request)
+        self.assertEqual(request.responseCode, 403)
+        self.assertEqual(body, 'no\n\n')
+
 #
 #    @defer.inlineCallbacks
 #    def test_invalidServices(self):
