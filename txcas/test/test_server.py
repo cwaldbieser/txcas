@@ -767,7 +767,7 @@ class FunctionalTest(TestCase):
         self.assertEqual(body, 'yes\nfoo\n')
 
     @defer.inlineCallbacks
-    def test_serviceValidate(self):
+    def _serviceOrProxyValidate(self, validate_func):
         ticket = yield self._setup_for_validation()
         app = self.app
          
@@ -777,7 +777,7 @@ class FunctionalTest(TestCase):
             'ticket': [ticket],
         })
 
-        body = yield app.serviceValidate_GET(request)
+        body = yield validate_func(request)
         doc = microdom.parseString(body)
         elms = doc.getElementsByTagName("cas:authenticationSuccess")
         if len(elms) > 0:
@@ -786,6 +786,17 @@ class FunctionalTest(TestCase):
                 elm = elms[0]
                 username = elm.childNodes[0].value
         self.assertEqual(username, 'foo')
+
+    @defer.inlineCallbacks
+    def test_serviceValidate(self):
+        app = self.app
+        yield self._serviceOrProxyValidate(app.serviceValidate_GET)
+    
+
+    @defer.inlineCallbacks
+    def test_proxyValidate(self):
+        app = self.app
+        yield self._serviceOrProxyValidate(app.proxyValidate_GET)
 
 #    @defer.inlineCallbacks
 #    def test_login_badpassword(self):
