@@ -88,6 +88,10 @@ class FakeRequest(server.Request):
 class FakeServiceManager(object):
     implements(IServiceManager)
 
+    def __init__(self, is_valid_service_func=None, is_sso_func=None):
+        self.is_sso_func = is_sso_func or (lambda s: True)
+        self.is_valid_service_func =  is_valid_service_func or (lambda s: True)
+
     def getMatchingService(self, service):
         """
         Return the entry for the first matching service or None.
@@ -98,14 +102,20 @@ class FakeServiceManager(object):
         """
         Returns True if the service is valid; False otherwise.
         """
-        return defer.succeed(True)
+        if self.is_valid_service_func(service):
+            return defer.succeed(True)
+        else:
+            return defer.succeed(False)
 
     def isSSOService(self, service):
         """
         Returns True if the service participates in SSO.
         Returns False if the service will only accept primary credentials.
         """
-        return defer.succeed(True)
+        if self.is_sso_func(service):
+            return defer.succeed(True)
+        else:
+            return defer.succeed(False)
 
 class TicketStoreTester(object):
     """
@@ -895,23 +905,26 @@ class FunctionalTest(TestCase):
         app = self.app
         yield self._serviceOrProxyValidate_badservice(self.app.proxyValidate_GET)
 
-#
-#    @defer.inlineCallbacks
-#    def test_invalidServices(self):
-#        """
-#        If the service doesn't match the validService function, fail all
-#        service-related requests
-#        """
-#        app = self.app
-#        app.ticket_store.valid_service = lambda x: False
-#
-#        request = FakeRequest(args={
-#            'service': ['foo'],
-#        })
-#
-#        body = yield self.app.login_GET(request)
-#        self.assertEqual(request.responseCode, 400)
-#
+
+    @defer.inlineCallbacks
+    def test_invalidServices(self):
+        """
+        If the service doesn't match the validService function, fail all
+        service-related requests
+        """
+        app = self.app
+        service_manager = FakeServiceManager(is_valid_service_func=lambda s: False)
+        app.validService = service_manager.isValidService
+        app.ticket_store.service_manager = service_manager
+
+        request = FakeRequest(args={
+            'service': ['foo'],
+        })
+
+        body = yield self.app.login_GET(request)
+        errors = self.flushLoggedErrors(txcas.exceptions.InvalidService)
+        self.assertEqual(request.responseCode, 403)
+
 #
 #    @defer.inlineCallbacks
 #    def test_ticket_granting_cookie_success(self):
