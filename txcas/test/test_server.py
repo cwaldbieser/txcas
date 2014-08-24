@@ -862,6 +862,39 @@ class FunctionalTest(TestCase):
         self.assertEqual(request.responseCode, 403)
         self.assertEqual(body, 'no\n\n')
 
+    @defer.inlineCallbacks
+    def _serviceOrProxyValidate_badservice(self, validate_func):
+        """
+        """
+        app = self.app
+        ticket = yield self._setup_for_validation()
+
+        # GET /validate with wrong service
+        request = FakeRequest(args={
+            'ticket': [ticket],
+            'service': ['different'],
+        })
+
+        body = yield validate_func(request)
+        self.assertEqual(request.responseCode, 403)
+        doc = microdom.parseString(body)
+        elms = doc.getElementsByTagName("cas:authenticationFailure")
+        self.assertEqual(len(elms), 1)
+
+    @defer.inlineCallbacks
+    def test_serviceValidate_badservice(self):
+        """
+        """
+        app = self.app
+        yield self._serviceOrProxyValidate_badservice(self.app.serviceValidate_GET)
+
+    @defer.inlineCallbacks
+    def test_proxyValidate_badservice(self):
+        """
+        """
+        app = self.app
+        yield self._serviceOrProxyValidate_badservice(self.app.proxyValidate_GET)
+
 #
 #    @defer.inlineCallbacks
 #    def test_invalidServices(self):
