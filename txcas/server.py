@@ -608,10 +608,11 @@ class ServerApp(object):
             return self.portal.login(credentials, mind, ICASUser)
 
         def log_auth_failed(err, username, request):
-            err.trap(Unauthorized)
+            err.trap(Unauthorized, InvalidTicket, InvalidService)
             client_ip = request.getClientIP()
-            log_cas_event("Failed to authenticate using primary credentials", [
-                        ('client_ip', client_ip), ('username', username)])
+            log_cas_event("Failed to authenticate using primary credentials: %s" %
+                    err.getErrorMessage(), [
+                    ('client_ip', client_ip), ('username', username)])
             return err
 
         def log_authentication(result, username, request):

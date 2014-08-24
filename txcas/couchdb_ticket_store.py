@@ -230,8 +230,9 @@ class CouchDBTicketStore(object):
     def _validService(self, service):
         def cb(result):
             if not result:
-                return defer.fail(InvalidService(service))
-            return service
+                return defer.fail(InvalidService(
+                    "Service '%s' is not allowed by this CAS service." % service))
+            return defer.succeed(service)
         return defer.maybeDeferred(self._getServiceValidator(), service).addCallback(cb)
 
     def _isSSOService(self, service):
@@ -508,8 +509,11 @@ class CouchDBTicketStore(object):
         def doit(_):
             d = self._useTicket(ticket)
             def cb(data):
-                if data[u'service'] != service:
-                    return defer.fail(InvalidTicket())
+                recorded_service = data[u'service']
+                if recorded_service != service:
+                    return defer.fail(InvalidService(
+                        "Recorded service '%s' does not match presented service '%s'." % (
+                            recorded_service, service)))
             return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
 

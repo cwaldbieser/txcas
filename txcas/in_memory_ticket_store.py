@@ -132,8 +132,9 @@ class InMemoryTicketStore(object):
     def _validService(self, service):
         def cb(result):
             if not result:
-                return defer.fail(InvalidService(service))
-            return service
+                return defer.fail(InvalidService(
+                    "Service '%s' is not allowed by this CAS service." % service))
+            return defer.succeed(service)
         
         return defer.maybeDeferred(self._getServiceValidator(), service).addCallback(cb)
 
@@ -259,12 +260,15 @@ class InMemoryTicketStore(object):
         Use a login ticket.
         """
         if not ticket.startswith("LT-"):
-            return defer.fail(InvalidTicket())
+            return defer.fail(InvalidTicket("Login ticket '%s' is malformed." % ticket))
         def doit(_):
             d = self._useTicket(ticket)
             def cb(data):
-                if data['service'] != service:
-                    return defer.fail(InvalidTicket())
+                recorded_service = data['service']
+                if recorded_service != service:
+                    return defer.fail(InvalidService(
+                        "Recorded service '%s' does not match presented service '%s'." % (
+                            recorded_service, service)))
             return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
 

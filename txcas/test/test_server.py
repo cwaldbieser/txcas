@@ -839,7 +839,7 @@ class FunctionalTest(TestCase):
             'service': ['different service'],
         })
         body = yield self.app.login_POST(request)
-        errors = self.flushLoggedErrors(txcas.exceptions.InvalidService, txcas.exceptions.InvalidTicket)
+        errors = self.flushLoggedErrors(txcas.exceptions.InvalidService)
         self.assertEqual(request.responseCode, 403)
 
 #
