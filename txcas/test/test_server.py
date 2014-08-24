@@ -79,7 +79,7 @@ class FakeRequest(server.Request):
     def setHeader(self, key, value):
         self.responseHeaders[key].append(value)
 
-    def setResponseCode(self, code):
+    def setResponseCode(self, code, message=None):
         self.responseCode = code
 
     def redirect(self, where):
@@ -798,37 +798,32 @@ class FunctionalTest(TestCase):
         app = self.app
         yield self._serviceOrProxyValidate(app.proxyValidate_GET)
 
-#    @defer.inlineCallbacks
-#    def test_login_badpassword(self):
-#        """
-#        The user's password has to match
-#        """
-#        app = self.app
-#
-#        # GET
-#        request = FakeRequest(args={
-#            'service': ['http://www.example.com'],
-#        })
-#
-#        body = yield self.app.login_GET(request)
-#        inputs = self.getInputs(body)
-#
-#        # POST with wrong password
-#        request = FakeRequest(args={
-#            'username': ['foo'],
-#            'password': ['bad password'],
-#            'lt': [inputs['lt']['value']],
-#            'service': [inputs['service']['value']],
-#        })
-#        body = yield self.app.login_POST(request)
-#
-#        self.assertEqual(request.responseCode, 403, "Should be forbidden")
-#        redirect_url = request.redirected
-#        self.assertTrue(redirect_url.startswith('/login?'))
-#        parsed = urlparse(redirect_url)
-#        qs = parse_qs(parsed.query)
-#        self.assertEqual(qs['service'][0], 'http://www.example.com',
-#                         "Should redirect for the same service")
+    @defer.inlineCallbacks
+    def test_login_badpassword(self):
+        """
+        The user's password has to match
+        """
+        app = self.app
+
+        # GET
+        request = FakeRequest(args={
+            'service': ['http://www.example.com'],
+        })
+
+        body = yield self.app.login_GET(request)
+        inputs = self.getInputs(body)
+
+        # POST with wrong password
+        request = FakeRequest(args={
+            'username': ['foo'],
+            'password': ['bad password'],
+            'lt': [inputs['lt']['value']],
+            'service': [inputs['service']['value']],
+        })
+        body = yield self.app.login_POST(request)
+
+        self.assertEqual(request.responseCode, 403, "Should be forbidden")
+
 #
 #
 #    @defer.inlineCallbacks

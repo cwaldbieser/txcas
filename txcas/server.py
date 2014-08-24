@@ -287,7 +287,7 @@ class ServerApp(object):
         """
         Set the response code during deferred chain processing.
         """
-        request.setResponseCode(code, msg=msg)
+        request.setResponseCode(code, message=msg)
         return result
         
     def _log_failure_filter(self, err, request):
@@ -418,6 +418,8 @@ class ServerApp(object):
         d = defer.maybeDeferred(expireTGT)
         d.addCallback(lambda x: service)
         d.addCallback(self.ticket_store.mkLoginTicket)
+        if failed:
+            d.addCallback(self._set_response_code_filter, 403, request)
         d.addCallback(self._page_view_result_callback, VIEW_LOGIN, service, failed, request)
         d.addErrback(service_err, service, request)
         d.addErrback(self._log_failure_filter, request)
