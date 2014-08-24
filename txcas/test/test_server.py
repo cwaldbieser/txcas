@@ -29,12 +29,14 @@ from txcas.settings import load_defaults, export_settings_to_dict
 from twisted.cred.portal import Portal, IRealm
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
 from twisted.internet import defer, task, reactor, utils, protocol
+from twisted.internet.address import IPv4Address
 from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath
 from twisted.trial.unittest import TestCase
+from twisted.web import microdom
 from twisted.web import server
-from twisted.web.test.test_web import DummyChannel
 from twisted.web.http_headers import Headers
+from twisted.web.test.test_web import DummyChannel
 from zope.interface import implements
 from zope.interface.verify import verifyObject
 
@@ -55,7 +57,7 @@ class FakeRequest(server.Request):
     """
 
     def __init__(self, method='GET', path='/', args=None, isSecure=False,
-                 headers=None):
+                 headers=None, client_ip='127.0.0.1'):
         server.Request.__init__(self, DummyChannel(), False)
         self.requestHeaders = Headers(headers)
         self.args = args or {}
@@ -69,6 +71,10 @@ class FakeRequest(server.Request):
         self.responseCode = None
         self.redirected = None
         self.parseCookies()
+        self.client_ip = '127.0.0.1'
+
+    def getClientIP(self):
+        return self.client_ip
 
     def setHeader(self, key, value):
         self.responseHeaders[key].append(value)
@@ -666,94 +672,121 @@ class ServerAppTest(TestCase):
 
 
 
-#class FunctionalTest(TestCase):
-#
-#    timeout = 3
-#
-#
-#    def setUp(self):
-#        checker = InMemoryUsernamePasswordDatabaseDontUse(foo='something')
-#        realm = UserRealm()
-#        self.clock = task.Clock()
-#        app = ServerApp(InMemoryTicketStore(reactor=self.clock), realm,
-#                        [checker], lambda x: True)
-#        self.app = app
-#        self.resource = app.app.resource()
-#
-#
-#    def getInputs(self, text):
-#        """
-#        Get a dictionary of inputs and their values from a blob of html
-#        """
-#        parsed = parseString(text)
-#        forms = parsed.getElementsByTagName('form')
-#        form = forms[0]
-#        inputs = form.getElementsByTagName('input')
-#        ret = {}
-#        for i in inputs:
-#            ret[i.getAttribute('name')] = {
-#                'value': i.getAttribute('value'),
-#            }
-#        return ret
-#
-#
-#    @defer.inlineCallbacks
-#    def test_basicSuccess(self):
-#        """
-#        You can log in and verify tickets
-#        """
-#        app = self.app
-#
-#        # GET /login
-#        request = FakeRequest(args={
-#            'service': ['http://www.example.com'],
-#        })
-#
-#        body = yield self.app.login_GET(request)
-#
-#        parsed = parseString(body)
-#        forms = parsed.getElementsByTagName('form')
-#        self.assertEqual(len(forms), 1, "There should only be one form")
-#        form = forms[0]
-#        inputs = form.getElementsByTagName('input')
-#        inputs = [(x.getAttribute('name'), x.getAttribute('value'), x.getAttribute('type')) for x in inputs]
-#
-#        lt_input = [x for x in inputs if x[0] == 'lt'][0]
-#        lt_value = lt_input[1]
-#        self.assertTrue(lt_value.startswith('LT-'), repr(lt_value))
-#        self.assertIn(('username', '', 'text'), inputs)
-#        self.assertIn(('password', '', 'password'), inputs)
-#        self.assertIn(('lt', lt_value, 'hidden'), inputs)
-#        self.assertIn(('service', 'http://www.example.com', 'hidden'), inputs)
-#
-#        # POST /login
-#        request = FakeRequest(args={
-#            'username': ['foo'],
-#            'password': ['something'],
-#            'lt': [lt_value],
-#            'service': ['http://www.example.com'],
-#        })
-#
-#        body = yield self.app.login_POST(request)
-#        redirect_url = request.redirected
-#        self.assertTrue(redirect_url.startswith('http://www.example.com'),
-#                        redirect_url)
-#        parsed = urlparse(redirect_url)
-#        qs = parse_qs(parsed.query)
-#        ticket = qs['ticket'][0]
-#        self.assertTrue(ticket.startswith('ST-'))
-#        self.assertEqual(len(ticket), 256)
-#
-#        # GET /validate
-#        request = FakeRequest(args={
-#            'service': ['http://www.example.com'],
-#            'ticket': [ticket],
-#        })
-#
-#        body = yield self.app.validate_GET(request)
-#        self.assertEqual(body, 'yes\nfoo\n')
-#
-#
+class FunctionalTest(TestCase):
+
+    timeout = 3
+
+
+    def setUp(self):
+        checker = InMemoryUsernamePasswordDatabaseDontUse(foo='something')
+        realm = BasicRealm()
+        self.clock = task.Clock()
+        app = ServerApp(InMemoryTicketStore(reactor=self.clock), realm,
+                        [checker], lambda x: True)
+        self.app = app
+        self.resource = app.app.resource()
+
+
+    def getInputs(self, text):
+        """
+        Get a dictionary of inputs and their values from a blob of html
+        """
+        parsed = parseString(text)
+        forms = parsed.getElementsByTagName('form')
+        form = forms[0]
+        inputs = form.getElementsByTagName('input')
+        ret = {}
+        for i in inputs:
+            ret[i.getAttribute('name')] = {
+                'value': i.getAttribute('value'),
+            }
+        return ret
+
+
+    @defer.inlineCallbacks
+    def _setup_for_validation(self):
+        """
+        You can log in and validate tickets
+        """
+        app = self.app
+
+        # GET /login
+        request = FakeRequest(args={
+            'service': ['http://www.example.com'],
+        })
+
+        body = yield self.app.login_GET(request)
+
+        parsed = parseString(body)
+        forms = parsed.getElementsByTagName('form')
+        self.assertEqual(len(forms), 1, "There should only be one form")
+        form = forms[0]
+        inputs = form.getElementsByTagName('input')
+        inputs = [(x.getAttribute('name'), x.getAttribute('value'), x.getAttribute('type')) for x in inputs]
+
+        lt_input = [x for x in inputs if x[0] == 'lt'][0]
+        lt_value = lt_input[1]
+        self.assertTrue(lt_value.startswith('LT-'), repr(lt_value))
+        self.assertIn(('username', '', 'text'), inputs)
+        self.assertIn(('password', '', 'password'), inputs)
+        self.assertIn(('lt', lt_value, 'hidden'), inputs)
+        self.assertIn(('service', 'http://www.example.com', 'hidden'), inputs)
+
+        # POST /login
+        request = FakeRequest(args={
+            'username': ['foo'],
+            'password': ['something'],
+            'lt': [lt_value],
+            'service': ['http://www.example.com'],
+        })
+
+        body = yield self.app.login_POST(request)
+        redirect_url = request.redirected
+        self.assertTrue(redirect_url.startswith('http://www.example.com'),
+                        redirect_url)
+        parsed = urlparse(redirect_url)
+        qs = parse_qs(parsed.query)
+        ticket = qs['ticket'][0]
+        self.assertTrue(ticket.startswith('ST-'))
+        ticket_size = self.app.ticket_store.ticket_size
+        self.assertEqual(len(ticket), ticket_size)
+        defer.returnValue(ticket)
+
+    @defer.inlineCallbacks
+    def test_validate(self):
+        ticket = yield self._setup_for_validation()
+        app = self.app
+         
+        # GET /validate
+        request = FakeRequest(args={
+            'service': ['http://www.example.com'],
+            'ticket': [ticket],
+        })
+
+        body = yield app.validate_GET(request)
+        self.assertEqual(body, 'yes\nfoo\n')
+
+    @defer.inlineCallbacks
+    def test_serviceValidate(self):
+        ticket = yield self._setup_for_validation()
+        app = self.app
+         
+        # GET /serviceValidate
+        request = FakeRequest(args={
+            'service': ['http://www.example.com'],
+            'ticket': [ticket],
+        })
+
+        body = yield app.serviceValidate_GET(request)
+        doc = microdom.parseString(body)
+        elms = doc.getElementsByTagName("cas:authenticationSuccess")
+        if len(elms) > 0:
+            elms = doc.getElementsByTagName("cas:user")
+            if len(elms) > 0:
+                elm = elms[0]
+                username = elm.childNodes[0].value
+        self.assertEqual(username, 'foo')
+
 #    @defer.inlineCallbacks
 #    def test_login_badpassword(self):
 #        """
