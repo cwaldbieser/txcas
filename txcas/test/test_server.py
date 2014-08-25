@@ -1016,46 +1016,46 @@ class FunctionalTest(TestCase):
     def test_tgc_st_via_proxyValidate(self):
         yield self._tgc_st_via_serviceOrProxyValidate(self.app.proxyValidate_GET)
 
-#    @defer.inlineCallbacks
-#    def test_logout(self):
-#        """
-#        You can log out (which will invalidate the ticket granting cookie)
-#        """
-#        app = self.app
-#
-#        # GET /login
-#        request = FakeRequest(args={
-#            'service': ['foo'],
-#        })
-#        body = yield self.app.login_GET(request)
-#        inputs = self.getInputs(body)
-#
-#        # POST /login
-#        request = FakeRequest(method='POST', path='/cas/login', args={
-#            'username': ['foo'],
-#            'password': ['something'],
-#            'lt': [inputs['lt']['value']],
-#            'service': ['foo'],
-#        })
-#        body = yield self.app.login_POST(request)
-#        self.assertTrue(len(request.cookies) >= 1, "Should have at least one"
-#                        " cookie")
-#        cookie = request.cookies[0]
-#
-#        # GET /logout
-#        request = FakeRequest(headers={
-#            'Cookie': [cookie],
-#        })
-#        body = yield self.app.logout_GET(request)
-#
-#        # GET /login again with the cookie
-#        request = FakeRequest(args={
-#            'service': ['somewhere'],
-#        }, headers={
-#            'Cookie': [cookie],
-#        })
-#        body = yield self.app.login_GET(request)
-#        inputs = self.getInputs(body)
-#        self.assertIn('lt', inputs)
-#
-#
+    @defer.inlineCallbacks
+    def test_logout(self):
+        """
+        You can log out (which will invalidate the ticket granting cookie)
+        """
+        app = self.app
+
+        # GET /login
+        request = FakeRequest(args={
+            'service': [self.service],
+        })
+        body = yield self.app.login_GET(request)
+        inputs = self.getInputs(body)
+
+        # POST /login
+        request = FakeRequest(method='POST', path='/cas/login', args={
+            'username': ['foo'],
+            'password': ['something'],
+            'lt': [inputs['lt']['value']],
+            'service': [self.service],
+        })
+        body = yield self.app.login_POST(request)
+        self.assertTrue(len(request.cookies) >= 1, "Should have at least one"
+                        " cookie")
+        cookie = request.cookies[0]
+
+        # GET /logout
+        request = FakeRequest(headers={
+            'Cookie': [cookie],
+        })
+        body = yield self.app.logout_GET(request)
+
+        # GET /login again with the cookie
+        request = FakeRequest(args={
+            'service': ['somewhere'],
+        }, headers={
+            'Cookie': [cookie],
+        })
+        body = yield self.app.login_GET(request)
+        inputs = self.getInputs(body)
+        self.assertIn('lt', inputs)
+
+
