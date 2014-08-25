@@ -118,6 +118,26 @@ should implement `IViewProvider`.  A view provider's :py:meth:`provideView`
 method should return a callable if it provides a particular view or `None`
 if it does not.
 
+----------
+Unit Tests
+----------
+|project| comes with its own unit tests.  To run the tests::
+
+    $ trial txcas/test/test_server.py
+
+You should see a number of test cases with statuses for each test:  **SKIPPED**,
+**FAIL** or **OK**.  Tests that are skipped typically require some kind of 
+middleware to be running that is difficult to emulate for the test.  An example
+would be the CouchDB ticket store.  These tests tend to be slow and require 
+configuration information to be passed to the test script.  To enable these
+tests, copy the file :file:`txcas/test/tests.cfg.example` to 
+:file:`txcas/test/tests.cfg`.  Edit the *Tests* section to enable the optional
+tests.  Provide any required settings for the middleware in the appropriate
+section and re-run the tests.
+
+When developing your own plugins, it is recommended you develop your own unit 
+tests.  For more information on unit testing with Twisted, see the `Trial`_
+documentation and its associated `howto`_.
 
 
 .. _Twisted Plugin System: http://twistedmatrix.com/documents/current/core/howto/plugin.html
@@ -127,6 +147,8 @@ if it does not.
 .. _twisted.cred.checkers.ICredentialsChecker: https://twistedmatrix.com/documents/current/api/twisted.cred.checkers.ICredentialsChecker.html
 .. _twisted.cred.portal.IRealm: https://twistedmatrix.com/documents/current/api/twisted.cred.portal.IRealm.html
 .. _twisted.cred.credentials.IUsernamePassword: https://twistedmatrix.com/documents/current/api/twisted.cred.credentials.IUsernamePassword.html
+.. _Trial: http://twistedmatrix.com/trac/wiki/TwistedTrial
+.. _howto: http://twistedmatrix.com/documents/current/core/howto/trial.html
 
 .. include:: placeholders.rst
 
