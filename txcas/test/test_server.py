@@ -925,70 +925,71 @@ class FunctionalTest(TestCase):
         errors = self.flushLoggedErrors(txcas.exceptions.InvalidService)
         self.assertEqual(request.responseCode, 403)
 
-#
-#    @defer.inlineCallbacks
-#    def test_ticket_granting_cookie_success(self):
-#        """
-#        After authenticating once, a client should be able to reuse a
-#        ticket-granting cookie to authenticate again without having to put
-#        in credentials.
-#        """
-#        app = self.app
-#
-#        # GET /login
-#        request = FakeRequest(args={
-#            'service': ['foo'],
-#        })
-#        body = yield self.app.login_GET(request)
-#        inputs = self.getInputs(body)
-#
-#        # POST /login
-#        request = FakeRequest(method='POST', path='/cas/login', args={
-#            'username': ['foo'],
-#            'password': ['something'],
-#            'lt': [inputs['lt']['value']],
-#            'service': ['foo'],
-#        })
-#        body = yield self.app.login_POST(request)
-#        self.assertTrue(len(request.cookies) >= 1, "Should have at least one"
-#                        " cookie")
-#        cookie = request.cookies[0]
-#        parts = cookie.split('; ')
-#        self.assertIn('Secure', parts)
-#        self.assertIn('HttpOnly', parts)
-#        self.assertIn('Path=/cas/', parts)
-#        name, value = parts[0].split('=', 1)
-#        self.assertEqual(name, self.app.cookie_name)
-#        self.assertTrue(value.startswith('TGC-'))
-#        
-#        # GET /login again with the cookie for a different service
-#        parts.remove('Secure')
-#        parts.remove('HttpOnly')
-#        request = FakeRequest(args={
-#            'service': ['somewhere'],
-#        }, headers={
-#            'Cookie': ['; '.join(parts)],
-#        })
-#        body = yield self.app.login_GET(request)
-#        redirect_url = request.redirected
-#        self.assertTrue(redirect_url.startswith('somewhere'), redirect_url)
-#        parsed = urlparse(redirect_url)
-#        qs = parse_qs(parsed.query)
-#        ticket = qs['ticket'][0]
-#
-#        self.assertEqual(len(request.cookies), 0, "Should not set the cookie "
-#                         "again")
-#
-#        # GET /validate
-#        request = FakeRequest(args={
-#            'service': ['somewhere'],
-#            'ticket': [ticket],
-#        })
-#
-#        body = yield self.app.validate_GET(request)
-#        self.assertEqual(body, 'yes\nfoo\n')
-#
-#
+
+    @defer.inlineCallbacks
+    def test_ticket_granting_cookie_success(self):
+        """
+        After authenticating once, a client should be able to reuse a
+        ticket-granting cookie to authenticate again without having to put
+        in credentials.
+        """
+        app = self.app
+
+        # GET /login
+        request = FakeRequest(args={
+            'service': [self.service],
+        })
+        body = yield self.app.login_GET(request)
+        inputs = self.getInputs(body)
+
+        # POST /login
+        request = FakeRequest(method='POST', path='/cas/login', args={
+            'username': ['foo'],
+            'password': ['something'],
+            'lt': [inputs['lt']['value']],
+            'service': [self.service],
+        })
+        body = yield self.app.login_POST(request)
+        self.assertTrue(len(request.cookies) >= 1, "Should have at least one"
+                        " cookie")
+        cookie = request.cookies[0]
+        parts = cookie.split('; ')
+        self.assertIn('Secure', parts)
+        self.assertIn('HttpOnly', parts)
+        self.assertIn('Path=/cas/', parts)
+        name, value = parts[0].split('=', 1)
+        self.assertEqual(name, self.app.cookie_name)
+        self.assertTrue(value.startswith('TGC-'))
+        
+        # GET /login again with the cookie for a different service
+        service2 = 'http://www.somewhere.net/protected'
+        parts.remove('Secure')
+        parts.remove('HttpOnly')
+        request = FakeRequest(args={
+            'service': [service2],
+        }, headers={
+            'Cookie': ['; '.join(parts)],
+        })
+        body = yield self.app.login_GET(request)
+        redirect_url = request.redirected
+        self.assertTrue(redirect_url.startswith(service2), redirect_url)
+        parsed = urlparse(redirect_url)
+        qs = parse_qs(parsed.query)
+        ticket = qs['ticket'][0]
+
+        self.assertEqual(len(request.cookies), 0, "Should not set the cookie "
+                         "again")
+
+        # GET /validate
+        request = FakeRequest(args={
+            'service': [service2],
+            'ticket': [ticket],
+        })
+
+        body = yield self.app.validate_GET(request)
+        self.assertEqual(body, 'yes\nfoo\n')
+
+
 #    @defer.inlineCallbacks
 #    def test_logout(self):
 #        """
