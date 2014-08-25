@@ -927,7 +927,7 @@ class FunctionalTest(TestCase):
 
 
     @defer.inlineCallbacks
-    def test_ticket_granting_cookie_success(self):
+    def _get_st_from_tgc(self, service, validate_func):
         """
         After authenticating once, a client should be able to reuse a
         ticket-granting cookie to authenticate again without having to put
@@ -962,17 +962,16 @@ class FunctionalTest(TestCase):
         self.assertTrue(value.startswith('TGC-'))
         
         # GET /login again with the cookie for a different service
-        service2 = 'http://www.somewhere.net/protected'
         parts.remove('Secure')
         parts.remove('HttpOnly')
         request = FakeRequest(args={
-            'service': [service2],
+            'service': [service],
         }, headers={
             'Cookie': ['; '.join(parts)],
         })
         body = yield self.app.login_GET(request)
         redirect_url = request.redirected
-        self.assertTrue(redirect_url.startswith(service2), redirect_url)
+        self.assertTrue(redirect_url.startswith(service), redirect_url)
         parsed = urlparse(redirect_url)
         qs = parse_qs(parsed.query)
         ticket = qs['ticket'][0]
@@ -982,13 +981,40 @@ class FunctionalTest(TestCase):
 
         # GET /validate
         request = FakeRequest(args={
-            'service': [service2],
+            'service': [service],
             'ticket': [ticket],
         })
 
-        body = yield self.app.validate_GET(request)
+        body = yield validate_func(request)
+        defer.returnValue(body)
+
+    @defer.inlineCallbacks
+    def test_tgc_st_via_validate(self):
+        service = 'http://www.somewhere.net/protected'
+        body = yield self._get_st_from_tgc(service, self.app.validate_GET)
         self.assertEqual(body, 'yes\nfoo\n')
 
+    @defer.inlineCallbacks
+    def _tgc_st_via_serviceOrProxyValidate(self, validate_func):
+        service = 'http://www.somewhere.net/protected'
+        body = yield self._get_st_from_tgc(service, validate_func)
+        username = None
+        doc = microdom.parseString(body)
+        elms = doc.getElementsByTagName("cas:authenticationSuccess")
+        if len(elms) > 0:
+            elms = doc.getElementsByTagName("cas:user")
+            if len(elms) > 0:
+                elm = elms[0]
+                username = elm.childNodes[0].value
+        self.assertEqual(username, 'foo')
+
+    @defer.inlineCallbacks
+    def test_tgc_st_via_serviceValidate(self):
+        yield self._tgc_st_via_serviceOrProxyValidate(self.app.serviceValidate_GET)
+
+    @defer.inlineCallbacks
+    def test_tgc_st_via_proxyValidate(self):
+        yield self._tgc_st_via_serviceOrProxyValidate(self.app.proxyValidate_GET)
 
 #    @defer.inlineCallbacks
 #    def test_logout(self):
