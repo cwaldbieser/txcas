@@ -336,6 +336,19 @@ class ServerApp(object):
         OR
         authenticate using an existing TGC.
         """
+        print "!!! START !!!"
+        print request.channel
+        print request.channel.transport
+        print "introspection", dir(request.channel.transport)
+        peer_cert = request.channel.transport.getPeerCertificate()
+        print "peer cert", peer_cert
+        if peer_cert:
+            print "introspect", dir(peer_cert)
+            subject= peer_cert.get_subject()
+            print "subject", subject
+            print "introspect", dir(subject)
+            print "components", subject.get_components()
+        print "!!! END !!!\n"
         log_http_event(request)
         service = get_single_param_or_default(request, 'service', "")
         renew = get_single_param_or_default(request, 'renew', "")

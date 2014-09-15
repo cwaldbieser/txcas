@@ -229,6 +229,60 @@ class CASService(Service):
         self.site = Site(root)
 
     def startService(self):
-        endpoint = serverFromString(reactor, self.port_s)
-        endpoint.listen(self.site)
+        #----------------------------------------------------------------------
+        # Create endpoint from string.
+        #endpoint = serverFromString(reactor, self.port_s)
+        #endpoint.listen(self.site)
+        #----------------------------------------------------------------------
+
+        #----------------------------------------------------------------------
+        # NOTE: Could implement a `IStreamServerEndpointStringParser` plugin
+        # to parse options to verify cert ... maybe 'tls:...' ...
+        #----------------------------------------------------------------------
+
+        #----------------------------------------------------------------------
+        # Load a combined cert/private key in PEM format and wrap the context
+        # factory so it verifies its peer (the client) so that the client cert
+        # is made available from the request.
+        #
+        #with open("ssl/server.pem", "r") as f:
+        #    certData = f.read()
+        #certificate = ssl.PrivateCertificate.loadPEM(certData)
+        #ctx = MyContextFactory(certificate.options())
+        #reactor.listenSSL(9800, self.site, ctx)
+        #----------------------------------------------------------------------
+
+        #----------------------------------------------------------------------
+        # Another way to create the context factory (from separate key and cert
+        # files in PEM format) such that it is configured to verify the peer. 
+        #----------------------------------------------------------------------
+        with open("ssl/key.pem", "r") as f:
+            buffer = f.read()
+        privateKey = crypto.load_privatekey(crypto.FILETYPE_PEM, buffer)
+        with open("ssl/cert.pem", "r") as f:
+            buffer = f.read()
+        certificate = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
+        ctx = ssl.CertificateOptions(
+            privateKey, 
+            certificate, 
+            method=SSL.SSLv23_METHOD, 
+            caCerts=[certificate],
+            verify=True)
+        reactor.listenSSL(9800, self.site, ctx)
+        #----------------------------------------------------------------------
+
+# Peer verifying context (always indicates verified).
+from twisted.internet import ssl
+from OpenSSL import SSL, crypto
+
+from twisted.python.modules import getModule
+
+class MyContextFactory(ssl.ContextFactory):
+    def __init__(self, wrapped):
+        self.wrapped = wrapped
+
+    def getContext(self):
+        ctx = self.wrapped.getContext()
+        ctx.set_verify(SSL.VERIFY_PEER, lambda *args: True)
+        return ctx
 
