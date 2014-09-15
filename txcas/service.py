@@ -244,31 +244,42 @@ class CASService(Service):
         # Load a combined cert/private key in PEM format and wrap the context
         # factory so it verifies its peer (the client) so that the client cert
         # is made available from the request.
-        #
-        #with open("ssl/server.pem", "r") as f:
-        #    certData = f.read()
-        #certificate = ssl.PrivateCertificate.loadPEM(certData)
-        #ctx = MyContextFactory(certificate.options())
-        #reactor.listenSSL(9800, self.site, ctx)
+        if True:
+            with open("ssl/server.pem", "r") as f:
+                certData = f.read()
+            certificate = ssl.PrivateCertificate.loadPEM(certData)
+            ctx = certificate.options()
+            # Fiddle with the SSS context to add our self-signed cert as an authority.
+            ssl_context = ctx.getContext()
+            store = ssl_context.get_cert_store()
+            cert = crypto.load_certificate(crypto.FILETYPE_PEM, certData)
+            store.add_cert(cert)
+            #--
+            ctx = MyContextFactory(ctx)
+            reactor.listenSSL(9800, self.site, ctx)
         #----------------------------------------------------------------------
 
         #----------------------------------------------------------------------
         # Another way to create the context factory (from separate key and cert
         # files in PEM format) such that it is configured to verify the peer. 
+        # NOTE: The `caCerts` option is establishing our self-signed cert as
+        # an authority.
         #----------------------------------------------------------------------
-        with open("ssl/key.pem", "r") as f:
-            buffer = f.read()
-        privateKey = crypto.load_privatekey(crypto.FILETYPE_PEM, buffer)
-        with open("ssl/cert.pem", "r") as f:
-            buffer = f.read()
-        certificate = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
-        ctx = ssl.CertificateOptions(
-            privateKey, 
-            certificate, 
-            method=SSL.SSLv23_METHOD, 
-            caCerts=[certificate],
-            verify=True)
-        reactor.listenSSL(9800, self.site, ctx)
+        if False:
+            with open("ssl/key.pem", "r") as f:
+                buffer = f.read()
+            privateKey = crypto.load_privatekey(crypto.FILETYPE_PEM, buffer)
+            with open("ssl/cert.pem", "r") as f:
+                buffer = f.read()
+            certificate = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
+            ctx = ssl.CertificateOptions(
+                privateKey, 
+                certificate, 
+                method=SSL.SSLv23_METHOD, 
+                caCerts=[certificate],
+                verify=True)
+            ctx = MyContextFactory(ctx)
+            reactor.listenSSL(9800, self.site, ctx)
         #----------------------------------------------------------------------
 
 # Peer verifying context (always indicates verified).

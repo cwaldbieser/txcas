@@ -1,0 +1,13 @@
+
+-----------------------------------------
+Generate Private Key and Self Signed Cert
+-----------------------------------------
+$ openssl genrsa -out privatekey.pem 2048
+$ openssl req -new -x509 -key privatekey.pem -out public.pem -days 1095
+
+--------------
+client_test.py
+--------------
+The file `server.pub.pem` should be the *server's* public certificate.
+The file `client.pem` should be the *combined* client certificate + client private key (in that order).
+
