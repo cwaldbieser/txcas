@@ -1,13 +1,40 @@
 
------------------------------------------
+================
+Create My Own CA
+================
+
+$ openssl genrsa -des3 -out rootCA.key 2048
+openssl req -x509 -new -nodes -key rootCA.key -days 1024 -out rootCA.pem
+
+------------
+Create a Key
+------------
+$ openssl genrsa -out example.key 2048
+
+------------------------------------
+Create a Certificate Signing Request
+------------------------------------
+$ openssl req -new -key example.key -out example.csr
+
+----------
+Sign a CSR
+----------
+openssl x509 -req -in example.csr -CA rootCA.pem -CAkey rootCA.key -CAcreateserial -out example.crt -days 500
+
+
+
+=========================================
 Generate Private Key and Self Signed Cert
------------------------------------------
+=========================================
 $ openssl genrsa -out privatekey.pem 2048
 $ openssl req -new -x509 -key privatekey.pem -out public.pem -days 1095
 
---------------
+==============
 client_test.py
---------------
-The file `server.pub.pem` should be the *server's* public certificate.
-The file `client.pem` should be the *combined* client certificate + client private key (in that order).
+==============
+* The file `authority.cert.pem` should be the CA's public certificate.  If the server is using a
+  self-signed cert, you can use the server's public cert.
+
+* The file `client.pem` should be the *combined* client certificate + client private key (in that order).
+  The client cert should be signed by the same CA the server is using.
 

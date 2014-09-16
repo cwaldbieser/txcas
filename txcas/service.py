@@ -244,14 +244,16 @@ class CASService(Service):
         # Load a combined cert/private key in PEM format and wrap the context
         # factory so it verifies its peer (the client) so that the client cert
         # is made available from the request.
-        if True:
+        if False:
             with open("ssl/server.pem", "r") as f:
                 certData = f.read()
             certificate = ssl.PrivateCertificate.loadPEM(certData)
             ctx = certificate.options()
-            # Fiddle with the SSS context to add our self-signed cert as an authority.
+            # Fiddle with the SSL context to add our self-signed cert as an authority.
             ssl_context = ctx.getContext()
             store = ssl_context.get_cert_store()
+            with open("ssl/ca.cert.pem", "r") as f:
+                certData = f.read()
             cert = crypto.load_certificate(crypto.FILETYPE_PEM, certData)
             store.add_cert(cert)
             #--
@@ -262,23 +264,50 @@ class CASService(Service):
         #----------------------------------------------------------------------
         # Another way to create the context factory (from separate key and cert
         # files in PEM format) such that it is configured to verify the peer. 
-        # NOTE: The `caCerts` option is establishing our self-signed cert as
-        # an authority.
+        #
+        # The `caCerts` option is used to set the public CA cert that
+        # signed the client certs that will be verified.
+        #
+        # The ssl_context verify_mode is set to VERIFY_PEER, but it is *not*
+        # set to fail if there is no peer cert.
+        #
+        # The veification callback checks if there was an SSL error.  This
+        # prevents a connection if a bad client cert that was not signed by the 
+        # trusted authority is presented.
         #----------------------------------------------------------------------
-        if False:
+        if True:
             with open("ssl/key.pem", "r") as f:
                 buffer = f.read()
             privateKey = crypto.load_privatekey(crypto.FILETYPE_PEM, buffer)
             with open("ssl/cert.pem", "r") as f:
                 buffer = f.read()
             certificate = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
+            with open("ssl/ca.cert.pem", "r") as f:
+                buffer = f.read()
+            authority = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
+            
             ctx = ssl.CertificateOptions(
                 privateKey, 
                 certificate, 
                 method=SSL.SSLv23_METHOD, 
-                caCerts=[certificate],
+                caCerts=[authority],
                 verify=True)
-            ctx = MyContextFactory(ctx)
+            #---
+            ssl_context = ctx.getContext()
+            verify_mode = ssl_context.get_verify_mode()
+            #print "verify_mode", verify_mode
+            #print "OpenSSL.SSL.VERIFY_NONE", SSL.VERIFY_NONE
+            #print "OpenSSL.SSL.VERIFY_PEER", SSL.VERIFY_PEER
+            #print "OpenSSL.SSL.VERIFY_CLIENT_ONCE", SSL.VERIFY_CLIENT_ONCE
+            #print "OpenSSL.SSL.VERIFY_FAIL_IF_NO_PEER_CERT", SSL.VERIFY_FAIL_IF_NO_PEER_CERT
+            def ssl_callback(conn, x509, errno, errdepth, ok):
+                #print "errno", errno
+                #print "errdepth", errdepth
+                #print "ok", ok
+                return ok 
+            ssl_context.set_verify(SSL.VERIFY_PEER, ssl_callback)
+            #---
+            #ctx = MyContextFactory(ctx)
             reactor.listenSSL(9800, self.site, ctx)
         #----------------------------------------------------------------------
 

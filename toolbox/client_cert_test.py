@@ -12,12 +12,12 @@ from twisted.web.client import getPage
 
 @defer.inlineCallbacks
 def main(reactor, netloc):
-    certData = getModule(__name__).filePath.sibling('server.pub.pem').getContent()
-    authData = getModule(__name__).filePath.sibling('client.pem').getContent()
-    clientCertificate = ssl.PrivateCertificate.loadPEM(authData)
-    authority = ssl.Certificate.loadPEM(certData)
+    caCertData = getModule(__name__).filePath.sibling('authority.cert.pem').getContent()
+    clientData = getModule(__name__).filePath.sibling('client.pem').getContent()
+    clientCertificate = ssl.PrivateCertificate.loadPEM(clientData)
+    authority = ssl.Certificate.loadPEM(caCertData)
 
-    options = ssl.optionsForClientTLS(u'odin', authority, clientCertificate)
+    options = ssl.optionsForClientTLS(u'kepler', authority, clientCertificate)
     s = yield getPage("https://%s/login" % netloc, contextFactory=options)
     print s
 
