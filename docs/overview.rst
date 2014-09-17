@@ -19,9 +19,9 @@ Features
 * Open source Python code making heavy use of the Twisted networking library.
 * Flexible plugin architecture, allowing customization of major architectural
   components.
-* Plugins for Authentication (file, unix, LDAP), User Realms (basic, LDAP), 
-  Ticket Stores (in-memory, CouchDB), Service Managers (JSON), and
-  View Providers (Jinja2 templates).
+* Plugins for Authentication (file, unix, LDAP, client x509), User Realms 
+  (basic, LDAP), Ticket Stores (in-memory, CouchDB), Service Managers (JSON), 
+  and View Providers (Jinja2 templates).
 * Simple configuration.
 * Runs on a `Raspberry Pi`_!
 
