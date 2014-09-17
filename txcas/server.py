@@ -367,18 +367,18 @@ class ServerApp(object):
                         ('client_ip', client_ip), ('username', avatar_id)])
             return avatar_id
 
-        def log_fail(err, request):
-            if not err.check(UnhandledCredentials):
-                return self._log_failure_filter(err, request)
-            else:
-                return err
+        def handle_not_authenticated(err, request):
+            err.trap(UnhandledCredentials, UnauthorizedLogin)
+            if err.check(UnauthorizedLogin):
+                log_cas_event("Trust authentication failed", [('auth_fail_reason', err.getErrorMessage()),])
+                d = self._presentLogin(request)
+                return d
 
         d = self.portal.login(transport, mind, ICASUser)
         d.addCallback(lambda x: x[1].username)
         d.addCallback(log_auth, request)
         d.addCallback(self._authenticated, True, service, request)
-        d.addErrback(log_fail, request)
-        d.addErrback(lambda _: self._presentLogin(request))
+        d.addErrback(handle_not_authenticated, request)
         return d
 
     def _authenticateByCookie(self, request):
