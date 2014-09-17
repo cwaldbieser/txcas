@@ -12,11 +12,13 @@ from txcas.server import ServerApp
 import txcas.settings
 
 # External modules
+from OpenSSL import SSL, crypto
+
 from twisted.application.service import Service
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
 from twisted.cred.strcred import ICheckerFactory
 from twisted.cred.portal import IRealm
-from twisted.internet import reactor
+from twisted.internet import reactor, ssl
 from twisted.internet.endpoints import serverFromString
 from twisted.python import log
 from twisted.web.server import Site
@@ -43,7 +45,8 @@ class CASService(Service):
 
     def __init__(
                 self,   
-                endpoint_s, 
+                endpoint_s=None, 
+                endpoint_options=None,
                 checkers=None, 
                 realm=None, 
                 ticket_store=None,
@@ -53,7 +56,9 @@ class CASService(Service):
                 validate_pgturl=None):
         """
         """
+        assert not ((endpoint_s is None) and (endpoint_options is None)), "Must specify either `endpoint_s` or `endpoint_options`."
         self.port_s = endpoint_s
+        self.endpoint_options = endpoint_options
 
         # Load the config.
         scp = txcas.settings.load_settings('cas', syspath='/etc/cas', defaults={
@@ -197,10 +202,13 @@ class CASService(Service):
             sys.stderr.write("[CONFIG] pgtUrls will *NOT* be validated.\n")
         
         # TGC uses "secure"?
-        if endpoint_s.startswith("ssl:"):
-            requireSSL = True
+        if endpoint_s is not None:
+            if endpoint_s.startswith("ssl:"):
+                requireSSL = True
+            else:
+                requireSSL = False
         else:
-            requireSSL = False
+            requireSSL = endpoint_options['ssl']
       
         # Service validation func.
         if service_manager is None:
@@ -229,100 +237,95 @@ class CASService(Service):
         self.site = Site(root)
 
     def startService(self):
-        #----------------------------------------------------------------------
-        # Create endpoint from string.
-        #endpoint = serverFromString(reactor, self.port_s)
-        #endpoint.listen(self.site)
-        #----------------------------------------------------------------------
-
-        #----------------------------------------------------------------------
-        # NOTE: Could implement a `IStreamServerEndpointStringParser` plugin
-        # to parse options to verify cert ... maybe 'tls:...' ...
-        #----------------------------------------------------------------------
-
-        #----------------------------------------------------------------------
-        # Load a combined cert/private key in PEM format and wrap the context
-        # factory so it verifies its peer (the client) so that the client cert
-        # is made available from the request.
-        if False:
-            with open("ssl/server.pem", "r") as f:
-                certData = f.read()
-            certificate = ssl.PrivateCertificate.loadPEM(certData)
-            ctx = certificate.options()
-            # Fiddle with the SSL context to add our self-signed cert as an authority.
-            ssl_context = ctx.getContext()
-            store = ssl_context.get_cert_store()
-            with open("ssl/ca.cert.pem", "r") as f:
-                certData = f.read()
-            cert = crypto.load_certificate(crypto.FILETYPE_PEM, certData)
-            store.add_cert(cert)
-            #--
-            ctx = MyContextFactory(ctx)
-            reactor.listenSSL(9800, self.site, ctx)
-        #----------------------------------------------------------------------
-
-        #----------------------------------------------------------------------
-        # Another way to create the context factory (from separate key and cert
-        # files in PEM format) such that it is configured to verify the peer. 
-        #
-        # The `caCerts` option is used to set the public CA cert that
-        # signed the client certs that will be verified.
-        #
-        # The ssl_context verify_mode is set to VERIFY_PEER, but it is *not*
-        # set to fail if there is no peer cert.
-        #
-        # The veification callback checks if there was an SSL error.  This
-        # prevents a connection if a bad client cert that was not signed by the 
-        # trusted authority is presented.
-        #----------------------------------------------------------------------
-        if True:
-            with open("ssl/key.pem", "r") as f:
-                buffer = f.read()
-            privateKey = crypto.load_privatekey(crypto.FILETYPE_PEM, buffer)
-            with open("ssl/cert.pem", "r") as f:
-                buffer = f.read()
-            certificate = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
-            with open("ssl/ca.cert.pem", "r") as f:
-                buffer = f.read()
-            authority = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
+        if self.port_s is not None:
+            #----------------------------------------------------------------------
+            # Create endpoint from string.
+            #----------------------------------------------------------------------
+            endpoint = serverFromString(reactor, self.port_s)
+            endpoint.listen(self.site)
+        else:
+            endpoint_options = self.endpoint_options
+            use_ssl = endpoint_options['ssl']
+            certKey = endpoint_options['certKey']
+            privateKey = endpoint_options['privateKey']
+            port = endpoint_options['port']
+            auth_files = endpoint_options['authorities']
+            ssl_method = getattr(SSL, endpoint_options['ssl_method'])
+            sys.stderr.write("[CONFIG] SSL Method: %s == %d\n" % (endpoint_options['ssl_method'], ssl_method))
+            verify_client = endpoint_options['verify_client_cert']
             
-            ctx = ssl.CertificateOptions(
-                privateKey, 
-                certificate, 
-                method=SSL.SSLv23_METHOD, 
-                caCerts=[authority],
-                verify=True)
-            #---
-            ssl_context = ctx.getContext()
-            verify_mode = ssl_context.get_verify_mode()
-            #print "verify_mode", verify_mode
-            #print "OpenSSL.SSL.VERIFY_NONE", SSL.VERIFY_NONE
-            #print "OpenSSL.SSL.VERIFY_PEER", SSL.VERIFY_PEER
-            #print "OpenSSL.SSL.VERIFY_CLIENT_ONCE", SSL.VERIFY_CLIENT_ONCE
-            #print "OpenSSL.SSL.VERIFY_FAIL_IF_NO_PEER_CERT", SSL.VERIFY_FAIL_IF_NO_PEER_CERT
-            def ssl_callback(conn, x509, errno, errdepth, ok):
-                #print "errno", errno
-                #print "errdepth", errdepth
-                #print "ok", ok
-                return ok 
-            ssl_context.set_verify(SSL.VERIFY_PEER, ssl_callback)
-            #---
-            #ctx = MyContextFactory(ctx)
-            reactor.listenSSL(9800, self.site, ctx)
-        #----------------------------------------------------------------------
+            if use_ssl:
+                #----------------------------------------------------------------------
+                # Another way to create the context factory (from separate key and cert
+                # files in PEM format) such that it is configured to verify the peer. 
+                #
+                # The `caCerts` option is used to set the public CA cert that
+                # signed the client certs that will be verified.
+                #
+                # The ssl_context verify_mode is set to VERIFY_PEER, but it is *not*
+                # set to fail if there is no peer cert.
+                #
+                # The veification callback checks if there was an SSL error.  This
+                # prevents a connection if a bad client cert that was not signed by the 
+                # trusted authority is presented.
+                #----------------------------------------------------------------------
+                with open(privateKey, "r") as f:
+                    buffer = f.read()
+                privateKey = crypto.load_privatekey(crypto.FILETYPE_PEM, buffer)
+                with open(certKey, "r") as f:
+                    buffer = f.read()
+                certificate = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
+                authorities = []
+                for auth_file in auth_files:
+                    with open(auth_file, "r") as f:
+                        buffer = f.read()
+                    authority = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
+                    authorities.append(authority)
+                
+                try: 
+                    ctx = ssl.CertificateOptions(
+                        privateKey, 
+                        certificate, 
+                        method=ssl_method, 
+                        caCerts=authorities,
+                        verify=verify_client)
+                except ValueError as ex:
+                    if str(ex) == "No such protocol":
+                        sys.stderr.write(
+                            "[ERROR] SSL protocol %s is not supported by the installed OpenSSL library.\n" % (
+                                endpoint_options['ssl_method']))
+                        sys.exit(1)
+                    else:
+                        raise
 
-# Peer verifying context (always indicates verified).
-from twisted.internet import ssl
-from OpenSSL import SSL, crypto
+                if verify_client:
+                    # If the client must be verified, set up a special callback
+                    # for the ssl context that does peer verification so the client
+                    # cert will be available later on from the Request.
+                    ssl_context = ctx.getContext()
+                    verify_mode = ssl_context.get_verify_mode()
+                    #print "verify_mode", verify_mode
+                    #print "OpenSSL.SSL.VERIFY_NONE", SSL.VERIFY_NONE
+                    #print "OpenSSL.SSL.VERIFY_PEER", SSL.VERIFY_PEER
+                    #print "OpenSSL.SSL.VERIFY_CLIENT_ONCE", SSL.VERIFY_CLIENT_ONCE
+                    #print "OpenSSL.SSL.VERIFY_FAIL_IF_NO_PEER_CERT", SSL.VERIFY_FAIL_IF_NO_PEER_CERT
+                    def ssl_callback(conn, x509, errno, errdepth, ok):
+                        #print "errno", errno
+                        #print "errdepth", errdepth
+                        #print "ok", ok
+                        return ok 
+                    ssl_context.set_verify(SSL.VERIFY_PEER, ssl_callback)
 
-from twisted.python.modules import getModule
+                reactor.listenSSL(port, self.site, ctx)
+            else: # Not SSL
+                reactor.listenTCP(port, self.site)
 
-class MyContextFactory(ssl.ContextFactory):
-    def __init__(self, wrapped):
-        self.wrapped = wrapped
-
-    def getContext(self):
-        ctx = self.wrapped.getContext()
-        ctx.set_verify(SSL.VERIFY_PEER, lambda *args: True)
-        return ctx
+#class MyContextFactory(ssl.ContextFactory):
+#    def __init__(self, wrapped):
+#        self.wrapped = wrapped
+#
+#    def getContext(self):
+#        ctx = self.wrapped.getContext()
+#        ctx.set_verify(SSL.VERIFY_PEER, lambda *args: True)
+#        return ctx
 

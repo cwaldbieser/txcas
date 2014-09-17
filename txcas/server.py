@@ -27,7 +27,8 @@ import treq
 
 from twisted.cred.portal import Portal, IRealm
 from twisted.cred.credentials import UsernamePassword
-from twisted.cred.error import Unauthorized, UnauthorizedLogin
+from twisted.cred.error import Unauthorized, UnauthorizedLogin, \
+                            UnhandledCredentials
 from twisted.internet import defer, reactor
 from twisted.python import log
 import twisted.web.http
@@ -336,24 +337,11 @@ class ServerApp(object):
         OR
         authenticate using an existing TGC.
         """
-        print "!!! START !!!"
-        print request.channel
-        print request.channel.transport
-        print "introspection", dir(request.channel.transport)
-        peer_cert = request.channel.transport.getPeerCertificate()
-        print "peer cert", peer_cert
-        if peer_cert:
-            print "introspect", dir(peer_cert)
-            subject= peer_cert.get_subject()
-            print "subject", subject
-            print "introspect", dir(subject)
-            print "components", subject.get_components()
-        print "!!! END !!!\n"
         log_http_event(request)
         service = get_single_param_or_default(request, 'service', "")
         renew = get_single_param_or_default(request, 'renew', "")
         if renew != "":
-            return self._presentLogin(request)
+            return self._authenticateByTrust(service, request)
             
         def service_err(err, service, request):
             err.trap(InvalidService)
@@ -362,11 +350,35 @@ class ServerApp(object):
             return self._get_page_view(VIEW_INVALID_SERVICE, service, request)
 
         d = self._authenticateByCookie(request)
-        d.addErrback(lambda _:self._presentLogin(request))
+        d.addErrback(lambda _: self._authenticateByTrust(service, request))
         d.addErrback(service_err, service, request)
         d.addErrback(self._log_failure_filter, request)
         d.addErrback(self._set_response_code_filter, 500, request)
         d.addErrback(self._page_view_errback, VIEW_ERROR_5XX,  request)
+        return d
+
+    def _authenticateByTrust(self, service, request):
+        transport = request.channel.transport
+        mind = {'service': service}
+
+        def log_auth(avatar_id, request):
+            client_ip = request.getClientIP()
+            log_cas_event("Authenticated via Trust", [
+                        ('client_ip', client_ip), ('username', avatar_id)])
+            return avatar_id
+
+        def log_fail(err, request):
+            if not err.check(UnhandledCredentials):
+                return self._log_failure_filter(err, request)
+            else:
+                return err
+
+        d = self.portal.login(transport, mind, ICASUser)
+        d.addCallback(lambda x: x[1].username)
+        d.addCallback(log_auth, request)
+        d.addCallback(self._authenticated, True, service, request)
+        d.addErrback(log_fail, request)
+        d.addErrback(lambda _: self._presentLogin(request))
         return d
 
     def _authenticateByCookie(self, request):

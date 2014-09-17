@@ -10,21 +10,37 @@ import txcas.settings
 import txcas.utils
 
 # External modules
+try:
+    from OpenSSL import SSL
+except ImportError:
+    class PhonyModule(object):
+        pass
+    SSL = PhonyModule() 
 from twisted.application import internet
 from twisted.application.service import IServiceMaker
 from twisted.cred import credentials, strcred
+from twisted.internet.interfaces import ISSLTransport
 from twisted.plugin import getPlugins, IPlugin
 from twisted.python import usage
 from zope.interface import implements
 
+valid_ssl_methods = [name for name, value in SSL.__dict__.iteritems() if name.endswith("_METHOD")]
+valid_ssl_methods.sort()
+def validSSLMethod(name):
+    if not name in valid_ssl_methods:
+        raise ValueError("Not a valid value.")
+    return name
+validSSLMethod.coerceDoc = "Must be one of: " + ', '.join(valid_ssl_methods)
 
 class Options(usage.Options, strcred.AuthOptionMixin):
     # This part is optional; it tells AuthOptionMixin what
     # kinds of credential interfaces the user can give us.
-    supportedInterfaces = (credentials.IUsernamePassword,)
+    supportedInterfaces = (credentials.IUsernamePassword, ISSLTransport)
+
 
     optFlags = [
             ["ssl", "s", "Use SSL"],
+            ["verify-client-cert", None, "Verify client certificates."],
             ["dont-validate-pgturl", None, "Don't validate pgtUrls."],
             ["help-realms", None, "List user realm plugins available."],
             ["help-ticket-stores", None, "List ticket store plugins available."],
@@ -46,7 +62,18 @@ class Options(usage.Options, strcred.AuthOptionMixin):
                         ["view-provider", None, None, "View provider plugin to use."],
                         ["help-view-provider", None, None, "Help for a specific view provider plugin."],
                         ["static-dir", None, None, "Serve static content from STATIC_DIR."],
+                        ["ssl-method", None, "SSLv23_METHOD", "Use TLS method.", validSSLMethod],
                     ]
+
+    def __init__(self):
+        usage.Options.__init__(self)
+        self['authorities'] = []
+
+    def opt_addCA(self, pem_path):
+        """
+        Add a trusted CA public cert (PEM format).
+        """
+        self['authorities'].append(pem_path)
 
 class MyServiceMaker(object):
     implements(IServiceMaker, IPlugin)
@@ -59,19 +86,17 @@ class MyServiceMaker(object):
         Construct a TCPServer from a factory defined in myproject.
         """
         # Endpoint
-        parts = []
-        if options["ssl"]:
-            parts.append("ssl")
-        else:
-            parts.append("tcp")
-        parts.append(str(options["port"]))
-        certKey = options['cert-key']
-        if certKey is not None:
-            parts.append('certKey=%s' % certKey)
-        privateKey = options['private-key']
-        if privateKey is not None:
-            parts.append('privateKey=%s' % privateKey)
-        endpoint = ':'.join(parts)
+        endpoint_options = {
+                'ssl': options['ssl'],
+                'ssl_method': options['ssl-method'],
+                'verify_client_cert': options['verify-client-cert'],
+                'port': options['port'],
+                'certKey': options['cert-key'],
+                'privateKey': options['private-key'],
+                'authorities': options['authorities'],
+            }
+
+        # Credential checkers.
         checkers = options.get("credCheckers", None)
 
         # Realm
@@ -190,7 +215,7 @@ class MyServiceMaker(object):
         ts_arg = options.get('ticket-store', None)
         if ts_arg is not None:
             ts_parts = ts_arg.split(':')
-            assert len(parts) !=0, "--ticket-store option is malformed."
+            assert len(ts_parts) !=0, "--ticket-store option is malformed."
             ts_tag = ts_parts[0]
             ts_argstr = ':'.join(ts_parts[1:])
             if ts_tag is not None:
@@ -212,7 +237,7 @@ class MyServiceMaker(object):
 
         # Create the service.
         return CASService(
-                endpoint, 
+                endpoint_options=endpoint_options, 
                 checkers=checkers, 
                 realm=realm, 
                 ticket_store=ticket_store,

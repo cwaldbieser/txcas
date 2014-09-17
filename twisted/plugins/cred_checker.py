@@ -1,5 +1,8 @@
 
 # Application modules
 from txcas.ldap_cred_checker import LDAPSimpleBindCheckerFactory
+from txcas.client_cert_checker import ClientCertificateCheckerFactory
 
 ldap_simple_bind_checker_factory = LDAPSimpleBindCheckerFactory()
+client_certificate_checket_factory = ClientCertificateCheckerFactory()
+
