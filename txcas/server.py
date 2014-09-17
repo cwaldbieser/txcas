@@ -26,7 +26,7 @@ from klein import Klein
 import treq
 
 from twisted.cred.portal import Portal, IRealm
-from twisted.cred.credentials import UsernamePassword
+from twisted.cred.credentials import UsernamePassword, IUsernamePassword
 from twisted.cred.error import Unauthorized, UnauthorizedLogin, \
                             UnhandledCredentials
 from twisted.internet import defer, reactor
@@ -258,6 +258,7 @@ class ServerApp(object):
         self.ticket_store = ticket_store
         self.portal = Portal(realm)
         self.realm = realm
+        self.checkers = checkers
         self.requireSSL = requireSSL
         map(self.portal.registerChecker, checkers)
         self.validService = validService or (lambda x: True)
@@ -283,6 +284,22 @@ class ServerApp(object):
         self.page_views = page_views
         
         self.ticket_store.register_ticket_expiration_callback(log_ticket_expiration)
+
+        self.show_login_page = self._isLoginPageRequired()
+
+    def _isLoginPageRequired(self):
+        # If no username/password cred checkers are present, showing the login
+        # page does not make sense.
+        checkers = self.checkers
+        found = False
+        for checker in checkers:
+            supported_creds = checker.credentialInterfaces
+            for supported_cred in supported_creds:
+                if supported_cred.isOrExtends(IUsernamePassword): 
+                    found = True
+                    break
+        return found
+
 
     def _set_response_code_filter(self, result, code, request, msg=None):
         """
@@ -371,8 +388,12 @@ class ServerApp(object):
             err.trap(UnhandledCredentials, UnauthorizedLogin)
             if err.check(UnauthorizedLogin):
                 log_cas_event("Trust authentication failed", [('auth_fail_reason', err.getErrorMessage()),])
+            if self.show_login_page:
                 d = self._presentLogin(request)
                 return d
+            else:
+                #TODO: How to respond if trust auth fails and there is no login auth?
+                return err
 
         d = self.portal.login(transport, mind, ICASUser)
         d.addCallback(lambda x: x[1].username)
@@ -653,8 +674,12 @@ class ServerApp(object):
             if not err.check(Unauthorized):
                 log.err(err)
 
-            d = self._presentLogin(request, failed=True)
-            return d
+            if self.show_login_page:
+                d = self._presentLogin(request, failed=True)
+                return d
+            else:
+                #TODO: How to respond if trust auth fails and there is no login auth?
+                return err
 
         # check credentials
         d = self.ticket_store.useLoginTicket(ticket, service)
