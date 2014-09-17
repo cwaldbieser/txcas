@@ -57,6 +57,22 @@ class CASService(Service):
         """
         """
         assert not ((endpoint_s is None) and (endpoint_options is None)), "Must specify either `endpoint_s` or `endpoint_options`."
+
+        # Provide reasonable defaults for `endpoint_options`.
+        if endpoint_options is not None:
+            ep_defaults = {
+                'ssl': False,
+                'ssl_method': SSL.SSLv23_METHOD,
+                'verify_client_cert': False,
+                'port': 9800,
+                'certKey': None,
+                'privateKey': None,
+                'authorities': [],
+            }
+            ep_defaults.update(endpoint_options)
+            endpoint_options = ep_defaults
+            del ep_defaults
+
         self.port_s = endpoint_s
         self.endpoint_options = endpoint_options
 
@@ -241,6 +257,7 @@ class CASService(Service):
             #----------------------------------------------------------------------
             # Create endpoint from string.
             #----------------------------------------------------------------------
+            sys.stderr.write("[CONFIG] Endpoint string: %s\n" % self.port_s)
             endpoint = serverFromString(reactor, self.port_s)
             endpoint.listen(self.site)
         else:
@@ -253,6 +270,15 @@ class CASService(Service):
             ssl_method = getattr(SSL, endpoint_options['ssl_method'])
             sys.stderr.write("[CONFIG] SSL Method: %s == %d\n" % (endpoint_options['ssl_method'], ssl_method))
             verify_client = endpoint_options['verify_client_cert']
+            
+            ep_keys = endpoint_options.keys()
+            ep_keys.sort()
+            lines = []
+            for key in ep_keys:
+                lines.append("- %s: %s" % (key, str(endpoint_options[key])))
+            del ep_keys
+            sys.stderr.write("[CONFIG] Endpoint\n%s\n" % ('\n'.join(lines)))
+            del lines
             
             if use_ssl:
                 #----------------------------------------------------------------------
