@@ -148,18 +148,20 @@ class CASService(Service):
             sys.stderr.write("[CONFIG] Ticket store received a reference to the service manager.\n")
    
         # Choose plugin(s) that implement ICredentialChecker 
-        if checkers is None:        
+        if checkers is None or len(checkers) == 0:        
             try:
                 tag_args =  scp.get('PLUGINS', 'cred_checker')
             except Exception:
                 sys.stderr.write("[ERROR] No valid credential checker was configured.\n")
                 sys.exit(1)
-            parts = tag_args.split(':')
-            tag = parts[0]
-            args = ':'.join(parts[1:])
-            factories = txcas.settings.get_plugins_by_predicate(
-                            ICheckerFactory, 
-                            lambda x: x.authType == tag)
+            factories = []
+            for tag_arg in tag_args.split(','):
+                parts = tag_arg.split(':')
+                tag = parts[0]
+                args = ':'.join(parts[1:])
+                factories.extend(txcas.settings.get_plugins_by_predicate(
+                                ICheckerFactory, 
+                                lambda x: x.authType == tag))
             if len(factories) == 0:
                 checkers= [InMemoryUsernamePasswordDatabaseDontUse(foo='password')]
             else:

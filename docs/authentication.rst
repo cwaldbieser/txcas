@@ -11,24 +11,61 @@ authenticates them.  If successful, it returns an avatarID that the user
 realm will use to produce an :term:`avatar`.
 
 Currently, txcas supports accepting simple username/password credentials as
-well as a client certificte checker.  
+well as a client certificte checker (trust-based authentication).  
 
 A number of credential checkers are available in `Twisted Cred`_  that support  
 the username/password credential type.  |project| also includes support for the
 ldap_simple_bind credential checker via the `ldaptor`_ library.
 
-Trust-based client certificate authentication occurs during the SSL handshake
-when a browser conects to the CAS service, so there is typically no reason
-to present a login page.  Authentication either succeeds or fails, typically
-with no intervention from the user.  This kind of credential checker deals
-mostly with inspecting the certificate presented and extracting the avatar
-ID from it.
+---------------------
+Authentication Phases
+---------------------
+It is possible for authentication to happen in one of two distinct phases.
+The phase that occurs first is the *credential requestor* (or *cred_requestor*)
+phase.  This happens when the user browser makes an HTTP GET request to the
+|project| service `/login` endpoint.  At this point, it is possible to attempt
+trust-based authentication *before* the login page is rendered.  If successful,
+a user will never see the login page.  Username/password based authentication
+is not available in this phase as the user has not ye had a chance to enter 
+credentials.
 
-Both trust-based and username/password checkers can be used simultaneously.
-If both are specified on the command line, trust-based authentication will
-occur first, and if successful the user s authenticated.  If trust-based 
-authentication fails, then the login page is presented for username/password
-authentication.
+The second phase is the *credential acceptor* (or *cred_acceptor*) phase.
+This phase happens when the user's browser makes an HTTP POST to the
+|project| service `/login` endpoint with a username and password.  **Both**
+trust-based authentication and username/password authentication may take
+place in this phase.  If a trust-based credential checker is configured to
+authenticate during this phase, it will attempt authentication first.  If
+successful, the resulting :term:`avatar ID` is compared to the username
+that was submitted.  If they do not match, authentication will fail.  
+Otherwise, username/password authentication will take place.  Only if **both**
+forms of authentication succeed will authentication be successful.
+
+*********************************************
+Typical Models For Trust-Based Authentication
+*********************************************
+Due to the fact that trsut-based authentication can be configure to occur
+in either authentication phase, the user experience can vary.
+
+In the **Trust-Only** model, trust based authentication is the only option.
+Only a trust-based credential checker is configured.  There is no 
+username/password credential checker.  The trust-based checker should be 
+configured to occur in the cred_requestor phase.  A user will be authenticated
+if her browser has a valid certificate.  If not, an error page would be 
+presented.  The user would never see a login page.
+
+The **Trust-or-Login** model, a trust-based checker is enabled in the cred_requestor
+phase.  A username/password checker is also enabled (this can *only* occur in 
+the cred_acceptor phase).  If the user's browser has a valid certificate, the
+user is authenticated transparently as in the "Trust-Only" model.  If not, the
+user will be presented with the |project| login view and be able to authenticate
+with a username/password.
+
+In the **Trust-and-Login** (a kind of :term:`two factor authentication`), the trust
+checker is enabled in the cred_acceptor phase and a username/password checker is
+also enabled.  In this case, authentication will *only* succeed if the user's
+browser has a valid certificate *and* she enters a valid username/password *and*
+the username she supplies matches the :term:`avatar ID` extracted from the
+certificate.
 
 Configuration
 -------------
@@ -86,6 +123,8 @@ An authentication method is selected via the :option:`cred_checker` option in th
   * :option:`transform`: A comma-separated list of 'upper', 'lower',
     'strip_domain'.  One or more transforms are
     applied to the extracted subject part..
+  * :option:`auth_when`: The authentication phase when this checker is active.
+    Valid options are 'cred_requestor' (default) and 'cred_acceptor'.
 
 If you have added additional plugins to your :file:`$TXCAS/twisted/plugins` 
 folder, additional option values may be available.  The plugin documentation 

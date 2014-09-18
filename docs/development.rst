@@ -86,6 +86,11 @@ interface.  User realm factories should implement the `IRealmFactory` interface.
 User realms should implement the `twisted.cred.portal.IRealm`_ interface. Avatars 
 produced by a realm should implement the `ICASUser` interface.
 
+Some credential checkers are able to operate based on information that is present
+in either of the 'cred_requestor' or the 'cred_acceptor' authentication phases.
+These plugins should implement the `ICASAuthWhen` interface to communicate to the
+server the phase in which the plugin should be active.
+
 **Ticket stores** manage the tickets used by CAS.  They track ticket lifetimes, 
 validate them, and expire them.  Ticket stores may need to work with *service 
 managers* to determine if a ticket ought to be created for a service provider, 

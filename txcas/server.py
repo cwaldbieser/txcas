@@ -407,7 +407,13 @@ class ServerApp(object):
         return d
 
     def _authenticateByTrust(self, portal, service, request):
-        transport = request.channel.transport
+        if hasattr(request, 'transport'):
+            transport = request.transport
+        elif hasattr(request, 'channel'):
+            transport = request.channel.transport
+        else:
+            raise Unauthorized("Could not get transport from request!")
+            
         mind = {'service': service}
 
         def log_auth(avatar_id, request):
@@ -668,21 +674,21 @@ class ServerApp(object):
         password = get_single_param_or_default(request, 'password', None)
         ticket = get_single_param_or_default(request, 'lt', None)
 
-        def handle_trust_auth_failed(err, request):
+        def log_trust_auth_failed(err, request):
             err.trap(UnhandledCredentials, UnauthorizedLogin)
             if err.check(UnauthorizedLogin):
-                log_cas_event("Trust authentication failed", [('auth_fail_reason', err.getErrorMessage()),])
-
-            d = checkPassword(None, username, password, service)
-            d.addErrback(log_auth_failed, username, request)
-            d.addCallback(log_authentication, username, request)
-            d.addCallback(inject_avatar_id, username)
-            d.addCallback(self._authenticated, True, service, request)
-            d.addErrback(eb, service, request)
-            d.addErrback(self._log_failure_filter, request)
-            d.addErrback(self._set_response_code_filter, 500, request)
-            d.addErrback(self._page_view_errback, VIEW_ERROR_5XX,  request)
-            return d
+                client_ip = request.getClientIP()
+                log_cas_event("Trust authentication failed", [
+                    ('auth_fail_reason', err.getErrorMessage()),
+                    ('client_ip', client_ip)])
+            return err
+            
+        def does_trust_avatar_match_username(trust_avatar_id, username, request):
+            if trust_avatar_id.lower() != username.lower():
+                raise UnauthorizedLogin(
+                    "Trust-based avatar ID, '%s', does not match submitted username '%s'." % (
+                        trust_avatar_id, username))
+            return True
 
         def checkPassword(_, username, password, service):
             credentials = UsernamePassword(username, password)
@@ -721,11 +727,17 @@ class ServerApp(object):
         portal = self.cred_acceptor_portal
         d = self.ticket_store.useLoginTicket(ticket, service)
         d.addCallback(lambda x: self._authenticateByTrust(portal, service, request))
-        d.addCallbacks(
-            self._authenticated, 
-            handle_trust_auth_failed,
-            (True, service, request), None,
-            (request,), None)
+        d.addCallback(does_trust_avatar_match_username, username, request)
+        d.addErrback(log_trust_auth_failed, request)
+        d.addCallback(checkPassword, username, password, service)
+        d.addErrback(log_auth_failed, username, request)
+        d.addCallback(log_authentication, username, request)
+        d.addCallback(inject_avatar_id, username)
+        d.addCallback(self._authenticated, True, service, request)
+        d.addErrback(eb, service, request)
+        d.addErrback(self._log_failure_filter, request)
+        d.addErrback(self._set_response_code_filter, 500, request)
+        d.addErrback(self._page_view_errback, VIEW_ERROR_5XX,  request)
         return d
 
 

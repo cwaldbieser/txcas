@@ -8,6 +8,11 @@ Glossary
         implement the interface ICASUSer.  The avatar will have a username
         and possibly one or more attributes associated with it.
 
+    AVATAR ID
+        An identifier that can be used to uniquely represent an :term:`avatar`.
+        A username submitted from a login form could be an example of an
+        avatar ID.
+
     PGT
         Proxy Granting Ticket.  A ticket obtained by a service provider that
         allows it to request proxt tickets from CAS.  The proxy tickets can
@@ -38,4 +43,10 @@ Glossary
         by providing primary credentials.  The TGT is then used to request
         service tickets that a service provider can validate with CAS to prove
         that the ticket presenter has been authenticated by CAS.
+
+    TWO FACTOR AUTHENTICATION
+        Authentication based on two independent authentication factors.  Factors
+        may include something known to a user, something a user has, or something
+        a user is.  See http://en.wikipedia.org/wiki/Multi-factor_authentication
+        for more information.
 

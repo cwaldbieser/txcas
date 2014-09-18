@@ -29,6 +29,12 @@ Generate Private Key and Self Signed Cert
 $ openssl genrsa -out privatekey.pem 2048
 $ openssl req -new -x509 -key privatekey.pem -out public.pem -days 1095
 
+=======================================================
+Convert a Certificate and Key in PEM format to PKCS #12
+=======================================================
+This is used for getting a cert+key in a format browsers will import for client certs.
+$ openssl pkcs12 -export -out client.pfx -inkey client.key.pem -in client.cert.pem -certfile ca.cert.pem
+
 ==============
 client_test.py
 ==============
