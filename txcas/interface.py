@@ -13,6 +13,10 @@ class IServiceManagerAcceptor(Interface):
     
     service_manager = Attribute('None or a reference to the current service manager plugin.')
 
+class ICASAuthWhen(Interface):
+
+    auth_when = Attribute("One of 'cred_acceptor', 'cred_requestor'.")
+
 class IRealmFactory(Interface):
 
     tag = Attribute('String used to identify the plugin factory.')

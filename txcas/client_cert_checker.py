@@ -6,6 +6,7 @@ from textwrap import dedent
 import sys
 
 # Application modules
+from txcas.interface import ICASAuthWhen
 import txcas.settings
 import txcas.utils
 
@@ -58,6 +59,10 @@ class ClientCertificateCheckerFactory(object):
         transform:    A comma-separated list of 'upper', 'lower',
                       'strip_domain'.  One or more transforms are
                       applied to the extracted subject part.. 
+        auth_when:    Perform authentication when requesting the 
+                      /login page ('cred_requestor', the default), or
+                      when POSTing the username/password credentials
+                      ('cred_acceptor').
         """)
 
     credentialInterfaces = (ISSLTransport,)
@@ -103,16 +108,25 @@ class ClientCertificateCheckerFactory(object):
                     sys.exit(1)
             transform = compose(*funcs)
             plugin_settings['transform'] = transform
+        auth_when = plugin_settings.get('auth_when', None)
+        if auth_when not in ('cred_acceptor', 'cred_requestor'):
+            sys.stderr.write(
+                ("Unknown auth_when '%s'.  Must be 'cred_acceptor' or"
+                " 'cred_requestor'.\n") % auth_when)
         return ClientCertificateChecker(**plugin_settings)
 
 class ClientCertificateChecker(object):
 
-    implements(ICredentialsChecker)
+    implements(ICredentialsChecker, ICASAuthWhen)
     credentialInterfaces = (ISSLTransport,)
 
-    def __init__(self, subject_part='emailAddress', transform=None):
+    auth_when = 'cred_requestor'
+
+    def __init__(self, subject_part='emailAddress', transform=None, auth_when=None):
         self.subject_part = subject_part
         self.transform = transform
+        if auth_when is not None:
+            self.auth_when = auth_when
 
     def requestAvatarId(self, credentials):
         """

@@ -17,7 +17,7 @@ from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         InvalidProxyCallback, ViewNotImplementedError, \
                         BadRequestError, InvalidTicketSpec
 import txcas.http
-from txcas.interface import ICASUser, ITicketStore
+from txcas.interface import ICASUser, ITicketStore, ICASAuthWhen
 from txcas.utils import http_status_filter
 
 #External modules
@@ -256,11 +256,20 @@ class ServerApp(object):
         
         self.cookies = {}
         self.ticket_store = ticket_store
-        self.portal = Portal(realm)
+        self.cred_requestor_portal = Portal(realm)
+        self.cred_acceptor_portal = Portal(realm)
         self.realm = realm
         self.checkers = checkers
+        map(
+            self.cred_requestor_portal.registerChecker, 
+            [c for c in checkers 
+                if (ICASAuthWhen.providedBy(c) and c.auth_when == 'cred_requestor')])
+        map(
+            self.cred_acceptor_portal.registerChecker, 
+            [c for c in checkers
+                if (ICASAuthWhen.providedBy(c) and c.auth_when == 'cred_acceptor')
+                    or (not ICASAuthWhen.providedBy(c)) ])
         self.requireSSL = requireSSL
-        map(self.portal.registerChecker, checkers)
         self.validService = validService or (lambda x: True)
         self.validate_pgturl = validate_pgturl
         self._static = static
@@ -357,34 +366,9 @@ class ServerApp(object):
         log_http_event(request)
         service = get_single_param_or_default(request, 'service', "")
         renew = get_single_param_or_default(request, 'renew', "")
-        if renew != "":
-            return self._authenticateByTrust(service, request)
-            
-        def service_err(err, service, request):
-            err.trap(InvalidService)
-            log.err(err)
-            request.setResponseCode(403)
-            return self._get_page_view(VIEW_INVALID_SERVICE, service, request)
+        portal = self.cred_requestor_portal
 
-        d = self._authenticateByCookie(request)
-        d.addErrback(lambda _: self._authenticateByTrust(service, request))
-        d.addErrback(service_err, service, request)
-        d.addErrback(self._log_failure_filter, request)
-        d.addErrback(self._set_response_code_filter, 500, request)
-        d.addErrback(self._page_view_errback, VIEW_ERROR_5XX,  request)
-        return d
-
-    def _authenticateByTrust(self, service, request):
-        transport = request.channel.transport
-        mind = {'service': service}
-
-        def log_auth(avatar_id, request):
-            client_ip = request.getClientIP()
-            log_cas_event("Authenticated via Trust", [
-                        ('client_ip', client_ip), ('username', avatar_id)])
-            return avatar_id
-
-        def handle_not_authenticated(err, request):
+        def handle_trust_auth_failed(err, request):
             err.trap(UnhandledCredentials, UnauthorizedLogin)
             if err.check(UnauthorizedLogin):
                 log_cas_event("Trust authentication failed", [('auth_fail_reason', err.getErrorMessage()),])
@@ -395,11 +379,47 @@ class ServerApp(object):
                 #TODO: How to respond if trust auth fails and there is no login auth?
                 return err
 
-        d = self.portal.login(transport, mind, ICASUser)
+        if renew != "":
+            d = self._authenticateByTrust(portal, service, request)
+            d.addCallbacks(
+                self._authenticated, 
+                handle_trust_auth_failed,
+                (True, service, request),
+                (request,))
+            return d
+            
+        def service_err(err, service, request):
+            err.trap(InvalidService)
+            log.err(err)
+            request.setResponseCode(403)
+            return self._get_page_view(VIEW_INVALID_SERVICE, service, request)
+
+        d = self._authenticateByCookie(request)
+        d.addErrback(lambda _: self._authenticateByTrust(portal, service, request).addCallbacks(
+            self._authenticated, 
+            handle_trust_auth_failed,
+            (True, service, request), None,
+            (request,), None))
+        d.addErrback(service_err, service, request)
+        d.addErrback(self._log_failure_filter, request)
+        d.addErrback(self._set_response_code_filter, 500, request)
+        d.addErrback(self._page_view_errback, VIEW_ERROR_5XX,  request)
+        return d
+
+    def _authenticateByTrust(self, portal, service, request):
+        transport = request.channel.transport
+        mind = {'service': service}
+
+        def log_auth(avatar_id, request):
+            client_ip = request.getClientIP()
+            log_cas_event("Authenticated via Trust", [
+                        ('client_ip', client_ip), ('username', avatar_id)])
+            return avatar_id
+
+
+        d = portal.login(transport, mind, ICASUser)
         d.addCallback(lambda x: x[1].username)
         d.addCallback(log_auth, request)
-        d.addCallback(self._authenticated, True, service, request)
-        d.addErrback(handle_not_authenticated, request)
         return d
 
     def _authenticateByCookie(self, request):
@@ -648,10 +668,26 @@ class ServerApp(object):
         password = get_single_param_or_default(request, 'password', None)
         ticket = get_single_param_or_default(request, 'lt', None)
 
+        def handle_trust_auth_failed(err, request):
+            err.trap(UnhandledCredentials, UnauthorizedLogin)
+            if err.check(UnauthorizedLogin):
+                log_cas_event("Trust authentication failed", [('auth_fail_reason', err.getErrorMessage()),])
+
+            d = checkPassword(None, username, password, service)
+            d.addErrback(log_auth_failed, username, request)
+            d.addCallback(log_authentication, username, request)
+            d.addCallback(inject_avatar_id, username)
+            d.addCallback(self._authenticated, True, service, request)
+            d.addErrback(eb, service, request)
+            d.addErrback(self._log_failure_filter, request)
+            d.addErrback(self._set_response_code_filter, 500, request)
+            d.addErrback(self._page_view_errback, VIEW_ERROR_5XX,  request)
+            return d
+
         def checkPassword(_, username, password, service):
             credentials = UsernamePassword(username, password)
             mind = {'service': service}
-            return self.portal.login(credentials, mind, ICASUser)
+            return self.cred_acceptor_portal.login(credentials, mind, ICASUser)
 
         def log_auth_failed(err, username, request):
             err.trap(Unauthorized, InvalidTicket, InvalidService)
@@ -682,16 +718,14 @@ class ServerApp(object):
                 return err
 
         # check credentials
+        portal = self.cred_acceptor_portal
         d = self.ticket_store.useLoginTicket(ticket, service)
-        d.addCallback(checkPassword, username, password, service)
-        d.addErrback(log_auth_failed, username, request)
-        d.addCallback(log_authentication, username, request)
-        d.addCallback(inject_avatar_id, username)
-        d.addCallback(self._authenticated, True, service, request)
-        d.addErrback(eb, service, request)
-        d.addErrback(self._log_failure_filter, request)
-        d.addErrback(self._set_response_code_filter, 500, request)
-        d.addErrback(self._page_view_errback, VIEW_ERROR_5XX,  request)
+        d.addCallback(lambda x: self._authenticateByTrust(portal, service, request))
+        d.addCallbacks(
+            self._authenticated, 
+            handle_trust_auth_failed,
+            (True, service, request), None,
+            (request,), None)
         return d
 
 
