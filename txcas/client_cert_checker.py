@@ -135,10 +135,10 @@ class ClientCertificateChecker(object):
         handshake.
         """
         if not ISSLTransport.providedBy(credentials):
-            raise UnauthorizedLogin("The credentials provided did not provide the ISSLTransport interface.")
+            return defer.fail(UnauthorizedLogin("The credentials provided did not provide the ISSLTransport interface."))
         peer_cert = credentials.getPeerCertificate()
         if peer_cert is None:
-            raise UnauthorizedLogin("A client certificate was not provided!")
+            return defer.fail(UnauthorizedLogin("A client certificate was not provided!"))
         subject= peer_cert.get_subject()
         #issuer = peer_cert.get_issuer()
         transform = self.transform
@@ -150,7 +150,7 @@ class ClientCertificateChecker(object):
                 avatar_part = value
                 break
         if avatar_part is None:
-            raise UnauthorizedLogin("Client certificate did not contain subject part '%s'." % match_part)
+            return defer.fail(UnauthorizedLogin("Client certificate did not contain subject part '%s'." % match_part))
         if transform is not None:
             return defer.maybeDeferred(transform, avatar_part)
         else:

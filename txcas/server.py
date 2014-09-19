@@ -384,8 +384,8 @@ class ServerApp(object):
             d.addCallbacks(
                 self._authenticated, 
                 handle_trust_auth_failed,
-                (True, service, request),
-                (request,))
+                (True, service, request), None,
+                (request,), None)
             return d
             
         def service_err(err, service, request):

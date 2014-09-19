@@ -14,6 +14,7 @@ from xml.dom.minidom import parseString
 # Application modules
 from txcas.basic_realm import BasicRealm
 from txcas.casuser import User
+from txcas.client_cert_checker import ClientCertificateChecker
 from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
                         VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
 from txcas.couchdb_ticket_store import CouchDBTicketStore
@@ -26,10 +27,12 @@ from txcas.settings import load_defaults, export_settings_to_dict
 
 
 # External modules
-from twisted.cred.portal import Portal, IRealm
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
+from twisted.cred.error import UnauthorizedLogin, UnhandledCredentials
+from twisted.cred.portal import Portal, IRealm
 from twisted.internet import defer, task, reactor, utils, protocol
 from twisted.internet.address import IPv4Address
+from twisted.internet.interfaces import ISSLTransport
 from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath
 from twisted.trial.unittest import TestCase
@@ -37,7 +40,7 @@ from twisted.web import microdom
 from twisted.web import server
 from twisted.web.http_headers import Headers
 from twisted.web.test.test_web import DummyChannel
-from zope.interface import implements
+from zope.interface import directlyProvides, implements
 from zope.interface.verify import verifyObject
 
 
@@ -49,12 +52,35 @@ def load_config(defaults=None):
     scp.read([path])
     
     return scp
-    
+   
+class FakeSubject(object):
+    def __init__(self, components):
+        self.components = components
+    def get_components(self):
+        return self.components
+ 
+class FakeClientCert(object):
+    def __init__(self, subject):
+        self.subject = subject
+    def get_subject(self):
+        return self.subject
 
 class FakeTransport(object):
     """
     A fake transport.
     """
+
+class FakeSSLTransport(FakeTransport):
+    """
+    A fake SSL transport.
+    """
+    implements(ISSLTransport)
+
+    def __init__(self, client_cert=None):
+        self._client_cert = client_cert
+
+    def getPeerCertificate(self):
+        return self._client_cert
 
 class FakeRequest(server.Request):
     """
@@ -62,7 +88,7 @@ class FakeRequest(server.Request):
     """
 
     def __init__(self, method='GET', path='/', args=None, isSecure=False,
-                 headers=None, client_ip='127.0.0.1', transport=None):
+                 headers=None, client_ip='127.0.0.1'):
         server.Request.__init__(self, DummyChannel(), False)
         self.requestHeaders = Headers(headers)
         self.args = args or {}
@@ -77,8 +103,7 @@ class FakeRequest(server.Request):
         self.redirected = None
         self.parseCookies()
         self.client_ip = '127.0.0.1'
-        if transport is None:
-            self.transport = FakeTransport()
+        #self.isSecure = isSecure
 
     def getClientIP(self):
         return self.client_ip
@@ -688,7 +713,43 @@ class ServerAppTest(TestCase):
         self.assertIn(checker, app.cred_acceptor_portal.checkers.values())
         self.assertEqual(app.validService, 'services')
 
+class ClientCertCheckerTest(TestCase):
 
+    def setUp(self):
+        """
+        """
+        xform = lambda x: ''.join(list(reversed(x)))
+        self.checker = ClientCertificateChecker(subject_part='CN', transform=xform)
+
+    @defer.inlineCallbacks
+    def test_no_ssl(self):
+        """
+        """
+        transport = FakeTransport()
+        checker = self.checker
+        yield self.assertFailure(checker.requestAvatarId(transport), UnauthorizedLogin)
+
+    @defer.inlineCallbacks
+    def test_no_peer_cert(self):
+        transport = FakeSSLTransport()
+        checker = self.checker
+        yield self.assertFailure(checker.requestAvatarId(transport), UnauthorizedLogin)
+
+    
+    @defer.inlineCallbacks
+    def test_no_subject_match(self):
+        cert = FakeClientCert(FakeSubject([('OU', 'foo'), ('O', 'baz')]))
+        transport = FakeSSLTransport(cert)
+        checker = self.checker
+        yield self.assertFailure(checker.requestAvatarId(transport), UnauthorizedLogin)
+
+    @defer.inlineCallbacks
+    def test_success(self):
+        cert = FakeClientCert(FakeSubject([('CN', 'frobnitzification'), ('OU', 'foo'), ('O', 'baz')]))
+        transport = FakeSSLTransport(cert)
+        checker = self.checker
+        avatar_id = yield checker.requestAvatarId(transport)
+        self.assertEqual(avatar_id, 'noitacifiztinborf')
 
 class FunctionalTest(TestCase):
 
@@ -1045,9 +1106,7 @@ class FunctionalTest(TestCase):
             'lt': [inputs['lt']['value']],
             'service': [self.service],
         })
-        print "!!!!!", 0
         body = yield self.app.login_POST(request)
-        print "!!!!!", 2
         self.assertTrue(len(request.cookies) >= 1, "Should have at least one"
                         " cookie")
         cookie = request.cookies[0]
