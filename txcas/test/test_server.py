@@ -51,13 +51,18 @@ def load_config(defaults=None):
     return scp
     
 
+class FakeTransport(object):
+    """
+    A fake transport.
+    """
+
 class FakeRequest(server.Request):
     """
     A fake request object.
     """
 
     def __init__(self, method='GET', path='/', args=None, isSecure=False,
-                 headers=None, client_ip='127.0.0.1'):
+                 headers=None, client_ip='127.0.0.1', transport=None):
         server.Request.__init__(self, DummyChannel(), False)
         self.requestHeaders = Headers(headers)
         self.args = args or {}
@@ -72,6 +77,8 @@ class FakeRequest(server.Request):
         self.redirected = None
         self.parseCookies()
         self.client_ip = '127.0.0.1'
+        if transport is None:
+            self.transport = FakeTransport()
 
     def getClientIP(self):
         return self.client_ip
@@ -676,8 +683,9 @@ class ServerAppTest(TestCase):
 
         app = ServerApp(ticket_store, realm, [checker], 'services')
         self.assertIs(app.ticket_store, ticket_store)
-        self.assertEqual(app.portal.realm, realm)
-        self.assertIn(checker, app.portal.checkers.values())
+        self.assertEqual(app.cred_requestor_portal.realm, realm)
+        self.assertEqual(app.cred_acceptor_portal.realm, realm)
+        self.assertIn(checker, app.cred_acceptor_portal.checkers.values())
         self.assertEqual(app.validService, 'services')
 
 
@@ -1037,7 +1045,9 @@ class FunctionalTest(TestCase):
             'lt': [inputs['lt']['value']],
             'service': [self.service],
         })
+        print "!!!!!", 0
         body = yield self.app.login_POST(request)
+        print "!!!!!", 2
         self.assertTrue(len(request.cookies) >= 1, "Should have at least one"
                         " cookie")
         cookie = request.cookies[0]

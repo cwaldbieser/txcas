@@ -681,6 +681,8 @@ class ServerApp(object):
                 log_cas_event("Trust authentication failed", [
                     ('auth_fail_reason', err.getErrorMessage()),
                     ('client_ip', client_ip)])
+            elif err.check(UnhandledCredentials):
+                return None
             return err
             
         def does_trust_avatar_match_username(trust_avatar_id, username, request):
