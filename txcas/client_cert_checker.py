@@ -108,11 +108,12 @@ class ClientCertificateCheckerFactory(object):
                     sys.exit(1)
             transform = compose(*funcs)
             plugin_settings['transform'] = transform
-        auth_when = plugin_settings.get('auth_when', None)
+        auth_when = plugin_settings.get('auth_when', 'cred_requestor')
         if auth_when not in ('cred_acceptor', 'cred_requestor'):
             sys.stderr.write(
                 ("Unknown auth_when '%s'.  Must be 'cred_acceptor' or"
                 " 'cred_requestor'.\n") % auth_when)
+            sys.exit(1)
         return ClientCertificateChecker(**plugin_settings)
 
 class ClientCertificateChecker(object):

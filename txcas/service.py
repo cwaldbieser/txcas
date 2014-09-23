@@ -1,5 +1,6 @@
 
 # Standard library.
+import glob
 import sys
 
 # Application modules
@@ -20,7 +21,9 @@ from twisted.cred.strcred import ICheckerFactory
 from twisted.cred.portal import IRealm
 from twisted.internet import reactor, ssl
 from twisted.internet.endpoints import serverFromString
+from twisted.internet.task import LoopingCall
 from twisted.python import log
+from twisted.python.filepath import FilePath
 from twisted.web.server import Site
 
 
@@ -272,6 +275,7 @@ class CASService(Service):
             ssl_method = getattr(SSL, endpoint_options['ssl_method'])
             sys.stderr.write("[CONFIG] SSL Method: %s == %d\n" % (endpoint_options['ssl_method'], ssl_method))
             verify_client = endpoint_options['verify_client_cert']
+            revoked_client_certs = endpoint_options['revoked_client_certs']
             
             ep_keys = endpoint_options.keys()
             ep_keys.sort()
@@ -283,6 +287,12 @@ class CASService(Service):
             del lines
             
             if use_ssl:
+                revoke_state = {
+                    'revoked': set([]),
+                    'last_mod_time': None}
+                loop_call = LoopingCall(load_revokations, revoked_client_certs, revoke_state)
+                loop_call.start(60)
+
                 #----------------------------------------------------------------------
                 # Another way to create the context factory (from separate key and cert
                 # files in PEM format) such that it is configured to verify the peer. 
@@ -341,19 +351,48 @@ class CASService(Service):
                         #print "errno", errno
                         #print "errdepth", errdepth
                         #print "ok", ok
-                        return ok 
+                        try:
+                            revoked = revoke_state['revoked']
+                            subject = tuple(x509.get_subject().get_components())
+                            issuer = tuple(x509.get_issuer().get_components())
+                            if (subject, issuer) in revoked:
+                                return False
+                            return ok 
+                        except:
+                            return False
                     ssl_context.set_verify(SSL.VERIFY_PEER, ssl_callback)
+                    ssl_context.set_options(SSL.OP_NO_SSLv2)
 
                 reactor.listenSSL(port, self.site, ctx)
             else: # Not SSL
                 reactor.listenTCP(port, self.site)
 
-#class MyContextFactory(ssl.ContextFactory):
-#    def __init__(self, wrapped):
-#        self.wrapped = wrapped
-#
-#    def getContext(self):
-#        ctx = self.wrapped.getContext()
-#        ctx.set_verify(SSL.VERIFY_PEER, lambda *args: True)
-#        return ctx
+def load_revokations(cert_list, revoke_state):
+    """
+    Load PEM formatted certificates that are no longer trustworthy
+    and store the suject and issuer.
+    `cert_list` is the path to a file that contains glob-like patterns
+    to PEM-formatted certificates.
+    """
+    if cert_list is not None:
+        last_mod_time = revoke_state['last_mod_time']
+        fp = FilePath(cert_list)
+        mod_time = fp.getModificationTime()
+        if last_mod_time is None or mod_time > last_mod_time:
+            revoke_state['last_mod_time'] = mod_time
+            revoked = set([])
+            with open(cert_list) as certlist_f:
+                for line in certlist_f:
+                    pattern = line.rstrip('\r\n')
+                    if pattern == '' or pattern.startswith('#'):
+                        continue
+                    for path in glob.glob(pattern):
+                        with open(path, "rb") as f:
+                            buffer = f.read()
+                            certificate = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
+                            revoked.add((
+                                tuple(certificate.get_subject().get_components()), 
+                                tuple(certificate.get_issuer().get_components())))
+            revoke_state['revoked'] = revoked
+
 

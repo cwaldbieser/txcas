@@ -63,6 +63,8 @@ class Options(usage.Options, strcred.AuthOptionMixin):
                         ["help-view-provider", None, None, "Help for a specific view provider plugin."],
                         ["static-dir", None, None, "Serve static content from STATIC_DIR."],
                         ["ssl-method", None, "SSLv23_METHOD", "Use TLS method.", validSSLMethod],
+                        ["revoked-client-certs", None, None, 
+                            "A file that contains the paths of PEM formated client certificates that have been revoked."],
                     ]
 
     def __init__(self):
@@ -94,6 +96,7 @@ class MyServiceMaker(object):
                 'certKey': options['cert-key'],
                 'privateKey': options['private-key'],
                 'authorities': options['authorities'],
+                'revoked_client_certs': options['revoked-client-certs'],
             }
 
         # Credential checkers.
