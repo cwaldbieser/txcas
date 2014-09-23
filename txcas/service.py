@@ -377,6 +377,8 @@ def load_revokations(cert_list, revoke_state):
     if cert_list is not None:
         last_mod_time = revoke_state['last_mod_time']
         fp = FilePath(cert_list)
+        if not fp.exists():
+            return
         mod_time = fp.getModificationTime()
         if last_mod_time is None or mod_time > last_mod_time:
             revoke_state['last_mod_time'] = mod_time
