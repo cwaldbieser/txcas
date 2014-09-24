@@ -62,7 +62,7 @@ class Options(usage.Options, strcred.AuthOptionMixin):
                         ["view-provider", None, None, "View provider plugin to use."],
                         ["help-view-provider", None, None, "Help for a specific view provider plugin."],
                         ["static-dir", None, None, "Serve static content from STATIC_DIR."],
-                        ["ssl-method", None, "SSLv23_METHOD", "Use TLS method.", validSSLMethod],
+                        ["ssl-method", None, "SSLv3_METHOD", "Use TLS method.", validSSLMethod],
                         ["revoked-client-certs", None, None, 
                             "A file that contains the paths of PEM formated client certificates that have been revoked."],
                     ]
@@ -76,6 +76,13 @@ class Options(usage.Options, strcred.AuthOptionMixin):
         Add a trusted CA public cert (PEM format).
         """
         self['authorities'].append(pem_path)
+
+    def postOptions(self):
+        if self['ssl']:
+            if self['cert-key'] is None:
+                raise usage.UsageError("An SSL endpoint requires a certificate.")
+            if self['private-key'] is None:
+                raise usage.UsageError("An SSL endpoint requires a private key.")
 
 class MyServiceMaker(object):
     implements(IServiceMaker, IPlugin)

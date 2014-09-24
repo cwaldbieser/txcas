@@ -65,7 +65,7 @@ class CASService(Service):
         if endpoint_options is not None:
             ep_defaults = {
                 'ssl': False,
-                'ssl_method': SSL.SSLv23_METHOD,
+                'ssl_method': SSL.SSLv3_METHOD,
                 'verify_client_cert': False,
                 'port': 9800,
                 'certKey': None,
@@ -287,6 +287,12 @@ class CASService(Service):
             del lines
             
             if use_ssl:
+                if certKey is None:
+                    sys.stderr.write("[ERROR] SSL Endpoint requires a certificate.")
+                    sys.exit(1)
+                if privateKey is None:
+                    sys.stderr.write("[ERROR] SSL Endpoint requires a certificate.")
+
                 revoke_state = {
                     'revoked': set([]),
                     'last_mod_time': None}

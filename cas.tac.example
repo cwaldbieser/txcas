@@ -21,6 +21,6 @@ from twisted.application import service
 from txcas.service import CASService
 
 application = service.Application('txcas')
-cas_service = CASService(ENDPOINT)
+cas_service = CASService(endpoint_s=ENDPOINT)
 cas_service.setServiceParent(application)
 

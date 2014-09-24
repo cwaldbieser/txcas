@@ -15,6 +15,7 @@ Contents:
    installation
    demonstration
    configuration
+   endpoints
    authentication
    user_realms
    ticket_stores
