@@ -470,7 +470,7 @@ class InMemoryTicketStore(object):
         dlist = []
         for service, st in services.iteritems():
             self.debug("Notifing service '%s' of SLO with ST '%s' ..." % (service, st))
-            dt = datetime.datetime.today()
+            dt = datetime.datetime.utcnow()
             issue_instant = dt.strftime("%Y-%m-%dT%H:%M:%S")
             identifier = str(uuid.uuid4())
             
@@ -480,7 +480,11 @@ class InMemoryTicketStore(object):
                 'service_ticket': xml_escape(st)
             }
             reqlib = self.reqlib
-            d = reqlib.post(service, data=data, timeout=30).addCallback(reqlib.content)
+            d = reqlib.post(
+                    service, 
+                    headers=Headers({'Content-Type': ['application/xml']}),
+                    data=data, 
+                    timeout=30).addCallback(reqlib.content)
             dlist.append(d)
         return defer.DeferredList(dlist, consumeErrors=True)
 

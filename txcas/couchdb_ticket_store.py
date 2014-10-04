@@ -702,7 +702,7 @@ class CouchDBTicketStore(object):
         template = self._samlLogoutTemplate
         dlist = []
         for service, st in services.iteritems():
-            dt = datetime.datetime.today()
+            dt = datetime.datetime.utcnow()
             issue_instant = dt.strftime("%Y-%m-%dT%H:%M:%S")
             identifier = str(uuid.uuid4())
             
@@ -719,7 +719,11 @@ class CouchDBTicketStore(object):
                 for error in errs:
                     log.err(error)
                 return err
-            d = reqlib.post(service.encode('utf-8'), data=data.encode('utf-8'), timeout=30).addCallback(
+            d = reqlib.post(
+                    service.encode('utf-8'), 
+                    headers=Headers({'Content-Type': ['application/xml']}),
+                    data=data.encode('utf-8'), 
+                    timeout=30).addCallback(
                 reqlib.content).addErrback(
                 logerr, service)
             dlist.append(d)
