@@ -21,6 +21,7 @@ import treq
 from twisted.internet import defer, reactor
 from twisted.plugin import IPlugin
 from twisted.python import log
+from twisted.web.http_headers import Headers
 from zope.interface import implements
 
 
@@ -480,6 +481,8 @@ class InMemoryTicketStore(object):
                 'service_ticket': xml_escape(st)
             }
             reqlib = self.reqlib
+            log.msg("[INFO] Making SLO callback to URL '%s' with ticket '%s' and instant '%s'." % (
+                service, st, issue_instant))
             d = reqlib.post(
                     service, 
                     headers=Headers({'Content-Type': ['application/xml']}),
