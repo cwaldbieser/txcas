@@ -44,6 +44,7 @@ class InMemoryTicketStoreFactory(object):
             - tgt_lifespan
             - pgt_lifespan
             - ticket_size
+            - verify_cert 
             ''')
 
     opt_usage = '''A colon-separated key=value list.'''
@@ -54,6 +55,9 @@ class InMemoryTicketStoreFactory(object):
         scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
         settings = txcas.settings.export_settings_to_dict(scp)
         ts_settings = settings.get('CAS', {})    
+        temp = settings.get('InMemoryTicketStore', {})    
+        ts_settings.update(temp)
+        del temp
         if argstring.strip() != "":
             argdict = dict((x.split('=') for x in argstring.split(':')))
             ts_settings.update(argdict)
@@ -71,6 +75,8 @@ class InMemoryTicketStoreFactory(object):
                 'tgt_lifespan', 'pgt_lifespan', 'ticket_size')
         ts_props = dict((prop, int(ts_settings[prop])) for prop in props if prop in ts_settings)
         txcas.utils.filter_args(InMemoryTicketStore.__init__, ts_settings, ['self'])
+        if 'verify_cert' in ts_settings:
+            ts_settings['verify_cert'] = bool(int(ts_settings['verify_cert']))
         obj = InMemoryTicketStore(**ts_settings)
         for prop, value in ts_props.iteritems():
             setattr(obj, prop, value)
