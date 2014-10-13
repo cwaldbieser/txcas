@@ -550,12 +550,12 @@ class ServerApp(object):
         def redirect(ticket, service, avatar_id, request):
             p = urlparse.urlparse(service)
             query = urlparse.parse_qs(p.params)
-            if 'ticket' in qs_map:
+            if 'ticket' in query:
                 del qs_map['ticket']
                 log.msg('''[WARN] warning="Removed 'ticket' parameter from service URL '%s'."  client_ip="%s" username="%s"''' % (
                     service, request.getClientIP(), avatar_id))
-            query['ticket'] = [ticket]
-            param_str = urlencode(qs_map)
+            query['ticket'] = ticket
+            param_str = urlencode(query)
             p = urlparse.ParseResult(*tuple(p[:4] + (param_str,) + p[5:]))
             service_url = urlparse.urlunparse(p)
             request.redirect(service_url)
