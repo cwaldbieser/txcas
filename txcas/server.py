@@ -547,16 +547,23 @@ class ServerApp(object):
                 log_service_ticket_created, service, tgc, request).addErrback(
                 log_failed_to_create_ticket, service, tgc, request)
             
-        def redirect(ticket, service, request):
-            query = urlencode({
-                'ticket': ticket,
-            })
-            request.redirect(service + '?' + query)
+        def redirect(ticket, service, avatar_id, request):
+            p = urlparse.urlparse(service)
+            query = urlparse.parse_qs(p.params)
+            if 'ticket' in qs_map:
+                del qs_map['ticket']
+                log.msg('''[WARN] warning="Removed 'ticket' parameter from service URL '%s'."  client_ip="%s" username="%s"''' % (
+                    service, request.getClientIP(), avatar_id))
+            query['ticket'] = [ticket]
+            param_str = urlencode(qs_map)
+            p = urlparse.ParseResult(*tuple(p[:4] + (param_str,) + p[5:]))
+            service_url = urlparse.urlunparse(p)
+            request.redirect(service_url)
 
         d = maybeAddCookie(avatar_id, service, request)
         if service != "":
             d.addCallback(mkServiceTicket, service, request)
-            d.addCallback(redirect, service, request)
+            d.addCallback(redirect, service, avatar_id, request)
         else:
             d.addCallback(replace_result, avatar_id)
             mind = {'service': ""}
