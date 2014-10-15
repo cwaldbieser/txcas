@@ -10,12 +10,6 @@ import txcas.settings
 import txcas.utils
 
 # External modules
-try:
-    from OpenSSL import SSL
-except ImportError:
-    class PhonyModule(object):
-        pass
-    SSL = PhonyModule() 
 from twisted.application import internet
 from twisted.application.service import IServiceMaker
 from twisted.cred import credentials, strcred
@@ -23,14 +17,6 @@ from twisted.internet.interfaces import ISSLTransport
 from twisted.plugin import getPlugins, IPlugin
 from twisted.python import usage
 from zope.interface import implements
-
-valid_ssl_methods = [name for name, value in SSL.__dict__.iteritems() if name.endswith("_METHOD")]
-valid_ssl_methods.sort()
-def validSSLMethod(name):
-    if not name in valid_ssl_methods:
-        raise ValueError("Not a valid value.")
-    return name
-validSSLMethod.coerceDoc = "Must be one of: " + ', '.join(valid_ssl_methods)
 
 class Options(usage.Options, strcred.AuthOptionMixin):
     # This part is optional; it tells AuthOptionMixin what
@@ -40,6 +26,10 @@ class Options(usage.Options, strcred.AuthOptionMixin):
 
     optFlags = [
             ["ssl", "s", "Use SSL"],
+            ["sslv3", None, "Allow SSLv3 (not recommended)."],
+            ["no-tlsv1", None, "Do not use TLSv1."],
+            ["no-tlsv1_1", None, "Do not use TLSv1.1"],
+            ["no-tlsv1_2", None, "Do not use TLSv1.2"],
             ["verify-client-cert", None, "Verify client certificates."],
             ["dont-validate-pgturl", None, "Don't validate pgtUrls."],
             ["help-realms", None, "List user realm plugins available."],
@@ -62,7 +52,6 @@ class Options(usage.Options, strcred.AuthOptionMixin):
                         ["view-provider", None, None, "View provider plugin to use."],
                         ["help-view-provider", None, None, "Help for a specific view provider plugin."],
                         ["static-dir", None, None, "Serve static content from STATIC_DIR."],
-                        ["ssl-method", None, "SSLv3_METHOD", "Use TLS method.", validSSLMethod],
                         ["revoked-client-certs", None, None, 
                             "A file that contains the paths of PEM formated client certificates that have been revoked."],
                     ]
@@ -95,15 +84,26 @@ class MyServiceMaker(object):
         Construct a TCPServer from a factory defined in myproject.
         """
         # Endpoint
+        ssl_method_options = set(['OP_NO_SSLv3'])
+        if options['sslv3']:
+            ssl_method_options.remove('OP_NO_SSLv3')
+        if options['no-tlsv1']:
+            ssl_method_options.add('OP_NO_TLSv1')
+        if options['no-tlsv1_1']:
+            ssl_method_options.add('OP_NO_TLSv1_1')
+        if options['no-tlsv1_2']:
+            ssl_method_options.add('OP_NO_TLSv1_2')
+        ssl_method_options = list(ssl_method_options)
+        ssl_method_options.sort()
         endpoint_options = {
                 'ssl': options['ssl'],
-                'ssl_method': options['ssl-method'],
                 'verify_client_cert': options['verify-client-cert'],
                 'port': options['port'],
                 'certKey': options['cert-key'],
                 'privateKey': options['private-key'],
                 'authorities': options['authorities'],
                 'revoked_client_certs': options['revoked-client-certs'],
+                'ssl_method_options': ssl_method_options,
             }
 
         # Credential checkers.

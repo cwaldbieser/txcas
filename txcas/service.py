@@ -65,7 +65,7 @@ class CASService(Service):
         if endpoint_options is not None:
             ep_defaults = {
                 'ssl': False,
-                'ssl_method': SSL.SSLv3_METHOD,
+                'ssl_method_options': ['OP_NO_SSLv3'],
                 'verify_client_cert': False,
                 'port': 9800,
                 'certKey': None,
@@ -272,8 +272,13 @@ class CASService(Service):
             privateKey = endpoint_options['privateKey']
             port = endpoint_options['port']
             auth_files = endpoint_options['authorities']
-            ssl_method = getattr(SSL, endpoint_options['ssl_method'])
-            sys.stderr.write("[CONFIG] SSL Method: %s == %d\n" % (endpoint_options['ssl_method'], ssl_method))
+            ssl_method_options = endpoint_options['ssl_method_options']
+            temp = []
+            for ssl_opt in ssl_method_options:
+                temp.append(getattr(SSL, ssl_opt))
+                sys.stderr.write("[CONFIG] SSL Option: %s\n" % ssl_opt)
+            ssl_method_options = temp
+            del temp
             verify_client = endpoint_options['verify_client_cert']
             revoked_client_certs = endpoint_options['revoked_client_certs']
             
@@ -330,7 +335,7 @@ class CASService(Service):
                     ctx = ssl.CertificateOptions(
                         privateKey, 
                         certificate, 
-                        method=ssl_method, 
+                        method=SSL.SSLv23_METHOD, 
                         caCerts=authorities,
                         verify=verify_client)
                 except ValueError as ex:
@@ -341,6 +346,11 @@ class CASService(Service):
                         sys.exit(1)
                     else:
                         raise
+
+                ssl_context = ctx.getContext()
+                ssl_context.set_options(SSL.OP_NO_SSLv2)
+                for ssl_opt in ssl_method_options:
+                    ssl_context.set_options(ssl_opt)
 
                 if verify_client:
                     # If the client must be verified, set up a special callback
@@ -367,7 +377,6 @@ class CASService(Service):
                         except:
                             return False
                     ssl_context.set_verify(SSL.VERIFY_PEER, ssl_callback)
-                    ssl_context.set_options(SSL.OP_NO_SSLv2)
 
                 reactor.listenSSL(port, self.site, ctx)
             else: # Not SSL

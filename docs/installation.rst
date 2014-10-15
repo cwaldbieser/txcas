@@ -103,6 +103,18 @@ of choice when working on a Pi, :program:`git` is needed to clone the |project|
 source, and :program:`htop` is just fun to watch once |project| is up and 
 running!
 
+----------------------------------------
+xubuntu 14.04 Dependencies for |project|
+----------------------------------------
+Here are the OS packages that needed to be installed on a new
+xubuntu 14.04 install to build |project|.
+
+* build-essential
+* libffi-dev
+* libssl-dev
+* libxml2-dev
+* libxslt1-dev
+
 **************************
 Create configuration files
 **************************
