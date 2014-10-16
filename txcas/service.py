@@ -330,7 +330,18 @@ class CASService(Service):
                         buffer = f.read()
                     authority = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
                     authorities.append(authority)
-                
+               
+                if bool(len(authorities) > 0) != bool(verify_client):
+                    if len(authorities) > 0:
+                        sys.stderr.write(
+                            "[ERROR] CA certificates were specified (--addCA), but "
+                            "client verification was not enabled (--verify-client-cert).\n")
+                    else:
+                        sys.stderr.write(
+                            "[ERROR] Client verification was enabled (--verify-client-cert), "
+                            "but no CA certificates were specified (--addCA).\n")
+                    sys.exit(1)
+ 
                 ctx = ssl.CertificateOptions(
                     privateKey, 
                     certificate, 
