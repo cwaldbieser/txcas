@@ -331,21 +331,12 @@ class CASService(Service):
                     authority = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
                     authorities.append(authority)
                 
-                try: 
-                    ctx = ssl.CertificateOptions(
-                        privateKey, 
-                        certificate, 
-                        method=SSL.SSLv23_METHOD, 
-                        caCerts=authorities,
-                        verify=verify_client)
-                except ValueError as ex:
-                    if str(ex) == "No such protocol":
-                        sys.stderr.write(
-                            "[ERROR] SSL protocol %s is not supported by the installed OpenSSL library.\n" % (
-                                endpoint_options['ssl_method']))
-                        sys.exit(1)
-                    else:
-                        raise
+                ctx = ssl.CertificateOptions(
+                    privateKey, 
+                    certificate, 
+                    method=SSL.SSLv23_METHOD, 
+                    caCerts=authorities,
+                    verify=verify_client)
 
                 ssl_context = ctx.getContext()
                 ssl_context.set_options(SSL.OP_NO_SSLv2)

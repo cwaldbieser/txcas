@@ -15,7 +15,10 @@ A SSL endpoint has many more options that a simple TCP endpoint.  The
 options on the command line.
 
 * :option:`ssl` : Use SSL
-* :option:`ssl-method` : The SSL method.
+* :option:`sslv3` : Use SSLv3 protocol (not recommended as this protocol is broken).
+* :option:`no-tlsv1`: Do not use the TLSv1 protocol.
+* :option:`no-tlsv1_1`: Do not use the TLSv1.1 protocol.
+* :option:`no-tlsv1_2`: Do not use the TLSv1.2 protocol.
 * :option:`cert-key` : The path to the server public certificate in PEM format.
 * :option:`private-key` : The path to the server private key in PEM format.
 * :option:`verify-client-cert` : Arrange for client certificates to be verified
@@ -31,6 +34,10 @@ options on the command line.
   the file modification time is updated, all the patterns will be re-processed.
   (The \*NIX :command:`touch` command can cause the file to be re-processed
   even if no pattern has been changed).
+
+.. note::
+
+    By default, an SSL endpoint will negotiate one of of TLSv1, TLSv1.1, or TLSv1.2.
 
 -----------------------------------
 Endpoint Configuration in TAC files
@@ -51,7 +58,7 @@ constructor.  The two methods of configuration are mutually exclusive.
 The endpoint mapping keys are as follows:
 
 * `ssl`: (boolean) Use SSL.
-* `ssl_method`: (string) The SSL Method (e.g. "SSLv3_METHOD").
+* `ssl_method_options`: (iterable) Strings representing OpenSSL method options (e.g. "OP_NO_SSLv3").
 * `verify_client_cert`: (boolean) Verify client certificates during the SSL handshake.
 * `port`: (int) The port on which to listen for incoming requests.
 * `certKey`: (string) Path to the server certificate (PEM format).
