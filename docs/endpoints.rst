@@ -21,8 +21,6 @@ options on the command line.
 * :option:`no-tlsv1_2`: Do not use the TLSv1.2 protocol.
 * :option:`cert-key` : The path to the server public certificate in PEM format.
 * :option:`private-key` : The path to the server private key in PEM format.
-* :option:`verify-client-cert` : Arrange for client certificates to be verified
-  during the SSL handshake.
 * :option:`addCA` : A path to a trusted CA certificate in PEM format used when 
   verifying client certificates.  Multiple CAs may be added by specifying this
   option multiple times.
@@ -59,7 +57,6 @@ The endpoint mapping keys are as follows:
 
 * `ssl`: (boolean) Use SSL.
 * `ssl_method_options`: (iterable) Strings representing OpenSSL method options (e.g. "OP_NO_SSLv3").
-* `verify_client_cert`: (boolean) Verify client certificates during the SSL handshake.
 * `port`: (int) The port on which to listen for incoming requests.
 * `certKey`: (string) Path to the server certificate (PEM format).
 * `privateKey`: (string) Path to the server private key (PEM format).

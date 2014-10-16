@@ -66,7 +66,6 @@ class CASService(Service):
             ep_defaults = {
                 'ssl': False,
                 'ssl_method_options': ['OP_NO_SSLv3'],
-                'verify_client_cert': False,
                 'port': 9800,
                 'certKey': None,
                 'privateKey': None,
@@ -279,7 +278,7 @@ class CASService(Service):
                 sys.stderr.write("[CONFIG] SSL Option: %s\n" % ssl_opt)
             ssl_method_options = temp
             del temp
-            verify_client = endpoint_options['verify_client_cert']
+            #verify_client = endpoint_options['verify_client_cert']
             revoked_client_certs = endpoint_options['revoked_client_certs']
             
             ep_keys = endpoint_options.keys()
@@ -331,16 +330,10 @@ class CASService(Service):
                     authority = crypto.load_certificate(crypto.FILETYPE_PEM, buffer)
                     authorities.append(authority)
                
-                if bool(len(authorities) > 0) != bool(verify_client):
-                    if len(authorities) > 0:
-                        sys.stderr.write(
-                            "[ERROR] CA certificates were specified (--addCA), but "
-                            "client verification was not enabled (--verify-client-cert).\n")
-                    else:
-                        sys.stderr.write(
-                            "[ERROR] Client verification was enabled (--verify-client-cert), "
-                            "but no CA certificates were specified (--addCA).\n")
-                    sys.exit(1)
+                if len(authorities) > 0:
+                    verify_client = True
+                else:
+                    verify_client = False
  
                 ctx = ssl.CertificateOptions(
                     privateKey, 

@@ -108,13 +108,12 @@ An authentication method is selected via the :option:`cred_checker` option in th
     authentication will fail.
 * :option:`client_cert`: This form of authentication is trust-based and happens
   during a SSL handshake.  In order for this checker to succeed, 
-  the |project| service must run on a SSL/TLS endpoint, and the
-  :option:`--verify-client-cert` option must be enabled.  At least one
-  at least one CA that the server will trust for client certificates via the
-  :option:`--addCA` option must be specified.  Multiple CAs can be specified, 
-  but the user experience may be degraded if client certificates from multiple 
-  CAs are specified.  A browser will typically ask the user to select the certificate
-  that ought to be presented to the server if multiple valid options are available.
+  the |project| service must run on a SSL/TLS endpoint.  At least one CA 
+  certificate that the server will trust for client certificates must be
+  specified via the option :option:`--addCA`.  Multiple CAs can be specified, 
+  but the user experience may be degraded.  A browser will typically ask the 
+  user to select the certificate that ought to be presented to the server if 
+  multiple valid options are available.
 
   The options for this plugin are:
 

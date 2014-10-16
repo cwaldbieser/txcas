@@ -30,7 +30,6 @@ class Options(usage.Options, strcred.AuthOptionMixin):
             ["no-tlsv1", None, "Do not use TLSv1."],
             ["no-tlsv1_1", None, "Do not use TLSv1.1"],
             ["no-tlsv1_2", None, "Do not use TLSv1.2"],
-            ["verify-client-cert", None, "Verify client certificates."],
             ["dont-validate-pgturl", None, "Don't validate pgtUrls."],
             ["help-realms", None, "List user realm plugins available."],
             ["help-ticket-stores", None, "List ticket store plugins available."],
@@ -97,7 +96,6 @@ class MyServiceMaker(object):
         ssl_method_options.sort()
         endpoint_options = {
                 'ssl': options['ssl'],
-                'verify_client_cert': options['verify-client-cert'],
                 'port': options['port'],
                 'certKey': options['cert-key'],
                 'privateKey': options['private-key'],
