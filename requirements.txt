@@ -1,6 +1,6 @@
 Jinja2==2.7.3
 MarkupSafe==0.23
-Twisted==14.0.0
+Twisted==14.0.2
 Werkzeug==0.9.6
 cffi==0.8.6
 characteristic==0.1.0
