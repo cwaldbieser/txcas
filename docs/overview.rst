@@ -56,7 +56,7 @@ My goals for this project are as follows:
 * Keep the administration of the service simple to use.
 
 .. _Central Authentication Service: http://jasig.github.io/cas/4.0.0/index.html
-.. _CAS Protocol v3.0: https://github.com/Jasig/cas/blob/master/cas-server-protocol/3.0/cas_protocol_3_0.md
+.. _CAS Protocol v3.0: http://jasig.github.io/cas/development/protocol/CAS-Protocol-Specification.html
 .. _Python: https://www.python.org/
 .. _Twisted: https://twistedmatrix.com/trac/
 .. _Apereo Foundation: http://www.apereo.org/

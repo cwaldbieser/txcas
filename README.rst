@@ -4,7 +4,7 @@ A CAS server implemented with Twisted
 
 .. highlight:: console
 
-The protocol: https://github.com/Jasig/cas/blob/master/cas-server-protocol/3.0/cas_protocol_3_0.md
+The protocol: http://jasig.github.io/cas/development/protocol/CAS-Protocol-Specification.html
 
 Full documentation is hosted at http://txcas.readthedocs.org/
 
