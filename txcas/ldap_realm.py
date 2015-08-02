@@ -1,22 +1,19 @@
 
-
 # Standard library
 from textwrap import dedent
 import sys
-
 # Application module
 from txcas.casuser import User
 from txcas.interface import ICASUser, IRealmFactory, IServiceManagerAcceptor
-
 # Application modules
 import txcas.settings
-
 # External module
-from ldaptor.protocols.ldap import ldapclient, ldapsyntax, ldapconnector
+from ldaptor.protocols.ldap.ldapclient import LDAPClient
+from ldaptor.protocols.ldap import ldapsyntax
 from ldaptor.protocols.ldap.ldaperrors import LDAPInvalidCredentials
-
 from twisted.cred.portal import IRealm
 from twisted.internet import defer, reactor
+from twisted.internet.endpoints import clientFromString, connectProtocol
 from twisted.plugin import IPlugin
 from zope.interface import implements
 
@@ -53,20 +50,16 @@ def escape_filter_chars(assertion_value,escape_mode=0):
         s = s.replace('\x00', r'\00')
     return s
 
+
 class LDAPRealmFactory(object):
-    """
-    """
     implements(IPlugin, IRealmFactory)
-
     tag = "ldap_realm"
-
     opt_help = dedent('''\
             Builds an avatar from a fetched LDAP entry.
             LDAP attributes are translated into avatar
             attributes.  Valid options include:
             
-            - host
-            - port
+            - endpointstr 
             - basedn
             - binddn
             - bindpw 
@@ -78,12 +71,9 @@ class LDAPRealmFactory(object):
             - service_based_attribs: Use attributes/aliases from service
               registry entry (found under key 'attributes'.
             ''')
-
     opt_usage = '''A colon-separated key=value list.'''
 
     def generateRealm(self, argstring=""):
-        """
-        """
         scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
         settings = txcas.settings.export_settings_to_dict(scp)
         ldap_settings = settings.get('LDAP', {})  
@@ -125,14 +115,12 @@ class LDAPRealmFactory(object):
         sys.stderr.write('\n') 
         return LDAPRealm(**ldap_settings) 
 
+
 class LDAPRealm(object):
-
-
     implements(IRealm, IServiceManagerAcceptor)
-    
     service_manager = None
     
-    def __init__(self, host, port, basedn, binddn, bindpw, 
+    def __init__(self, endpointstr, basedn, binddn, bindpw, 
                 query_template='(uid=%(username)s)', 
                 attribs=None, 
                 aliases=None,
@@ -146,8 +134,7 @@ class LDAPRealm(object):
         else:
             attribs = dict((k,k) for k in attribs)
         self._attribs = attribs
-        self._host = host
-        self._port = port
+        self._endpointstr = endpointstr
         self._basedn = basedn
         self._binddn = binddn
         self._bindpw = bindpw
@@ -155,8 +142,7 @@ class LDAPRealm(object):
         self._service_based_attribs = service_based_attribs
 
     def requestAvatar(self, avatarId, mind, *interfaces):
-        """
-        """
+
         def cb(avatar):
             if not ICASUser in interfaces:
                 raise NotImplementedError("This realm only implements ICASUser.")
@@ -167,12 +153,11 @@ class LDAPRealm(object):
         
     @defer.inlineCallbacks
     def _get_avatar(self, avatarId, mind):
-        serverip = self._host
+        endpointstr = self._endpointstr
         basedn = self._basedn
         binddn = self._binddn
         bindpw = self._bindpw
         query = self._query_template % {'username': escape_filter_chars(avatarId)}
-        
         if self._service_based_attribs:
             if mind:
                 service = mind['service']
@@ -188,10 +173,8 @@ class LDAPRealm(object):
                     attributes = self._attribs
         else:
             attributes = self._attribs
-
-        c = ldapconnector.LDAPClientCreator(reactor, ldapclient.LDAPClient)
-        overrides = {basedn: (serverip, self._port)}
-        client = yield c.connect(basedn, overrides=overrides)
+        e = clientFromString(reactor, self._endpointstr)
+        client = yield connectProtocol(e, LDAPClient())
         client = yield client.startTLS()        
         yield client.bind(binddn, bindpw)
         o = ldapsyntax.LDAPEntry(client, basedn)
@@ -208,13 +191,3 @@ class LDAPRealm(object):
                     attribs.append((alias, value))
         user = User(avatarId, attribs)
         defer.returnValue(user)
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        

@@ -2,20 +2,19 @@
 # Standard library
 from textwrap import dedent
 import sys
-
 # Application modules
 import txcas.settings
 import txcas.utils
-
 # External modules
-from ldaptor.protocols.ldap import ldapclient, ldapsyntax, ldapconnector
+from ldaptor.protocols.ldap.ldapclient import LDAPClient
+from ldaptor.protocols.ldap import ldapsyntax
 from ldaptor.protocols.ldap.ldaperrors import LDAPInvalidCredentials
-
 from twisted.cred import credentials
 from twisted.cred.checkers import ICredentialsChecker
 from twisted.cred.error import UnauthorizedLogin
 from twisted.cred.strcred import ICheckerFactory
 from twisted.internet import defer, reactor
+from twisted.internet.endpoints import clientFromString, connectProtocol
 from twisted.plugin import IPlugin
 from twisted.python import log
 from zope.interface import implements
@@ -70,38 +69,29 @@ class LDAPSimpleBindChecker(object):
     implements(IPlugin, ICredentialsChecker)
     credentialInterfaces = (credentials.IUsernamePassword,)
 
-
-    def __init__(self, host, port, basedn, binddn, bindpw, query_template='(uid=%(username)s)'):
-        self._host = host
-        self._port = port
+    def __init__(self, endpointstr, basedn, binddn, bindpw, query_template='(uid=%(username)s)'):
+        self._endpointstr = endpointstr
         self._basedn = basedn
         self._binddn = binddn
         self._bindpw = bindpw
         self._query_template = query_template
 
-
     def requestAvatarId(self, credentials):
-        
         def eb(err):
             if not err.check(UnauthorizedLogin, LDAPInvalidCredentials):
                 log.err(err)
             raise UnauthorizedLogin()
             
-        return self._make_connect(credentials).addErrback(
-            eb)
+        return self._make_connect(credentials).addErrback(eb)
 
     @defer.inlineCallbacks
     def _make_connect(self, credentials):
-        serverip = self._host
         basedn = self._basedn
-
-        c = ldapconnector.LDAPClientCreator(reactor, ldapclient.LDAPClient)
-        overrides = {basedn: (serverip, self._port)}
-        client = yield c.connect(basedn, overrides=overrides)
+        e = clientFromString(reactor, self._endpointstr)
+        client = yield connectProtocol(e, LDAPClient())
         client = yield client.startTLS()
         dn = yield self._get_dn(client, credentials.username)
         yield client.bind(dn, credentials.password)
-        
         defer.returnValue(credentials.username)
         
     @defer.inlineCallbacks
@@ -110,14 +100,13 @@ class LDAPSimpleBindChecker(object):
         binddn = self._binddn
         bindpw = self._bindpw
         query = self._query_template % {'username': escape_filter_chars(username)}
-        
         try:
             yield client.bind(binddn, bindpw)
         except Exception as ex:
             log.err(ex)
             raise LDAPAdminBindError("Error binding with admin DN: %s." % binddn)
         o = ldapsyntax.LDAPEntry(client, basedn)
-        results = yield o.search(filterText=query, attributes=['uid'])
+        results = yield o.search(filterText=query, attributes=['dn'])
         if len(results) != 1:
             raise UnauthorizedLogin()
         entry = results[0]
@@ -144,8 +133,7 @@ class LDAPSimpleBindCheckerFactory(object):
             Uses a 2-stage BIND to determine if the credentials 
             presented are valid.  Valid options include:
             
-            - host
-            - port
+            - endpointstr
             - basedn
             - binddn
             - bindpw 
