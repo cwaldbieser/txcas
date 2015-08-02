@@ -27,7 +27,7 @@ class Options(usage.Options, strcred.AuthOptionMixin):
     optFlags = [
             ["ssl", "s", "Use SSL"],
             ["sslv3", None, "Allow SSLv3 (not recommended)."],
-            ["no-tlsv1", None, "Do not use TLSv1."],
+            ["tlsv1", None, "Allow TLSv1 (not recommended)."],
             ["no-tlsv1_1", None, "Do not use TLSv1.1"],
             ["no-tlsv1_2", None, "Do not use TLSv1.2"],
             ["dont-validate-pgturl", None, "Don't validate pgtUrls."],
@@ -83,11 +83,11 @@ class MyServiceMaker(object):
         Construct a TCPServer from a factory defined in myproject.
         """
         # Endpoint
-        ssl_method_options = set(['OP_NO_SSLv3'])
+        ssl_method_options = set(['OP_NO_SSLv3', 'OP_NO_TLSv1'])
         if options['sslv3']:
             ssl_method_options.remove('OP_NO_SSLv3')
-        if options['no-tlsv1']:
-            ssl_method_options.add('OP_NO_TLSv1')
+        if options['tlsv1']:
+            ssl_method_options.remove('OP_NO_TLSv1')
         if options['no-tlsv1_1']:
             ssl_method_options.add('OP_NO_TLSv1_1')
         if options['no-tlsv1_2']:
@@ -103,17 +103,14 @@ class MyServiceMaker(object):
                 'revoked_client_certs': options['revoked-client-certs'],
                 'ssl_method_options': ssl_method_options,
             }
-
         # Credential checkers.
         checkers = options.get("credCheckers", None)
-
         # Realm
         if 'help-realms' in options and options['help-realms']:    
             sys.stdout.write("Available Realm Plugins\n") 
             factories = list(getPlugins(IRealmFactory))
             txcas.utils.format_plugin_help_list(factories, sys.stdout)
             sys.exit(0) 
-
         if 'help-realm' in options and options['help-realm'] is not None:
             realm_tag = options['help-realm']
             factory = txcas.settings.get_plugin_factory(realm_tag, IRealmFactory)
@@ -123,7 +120,6 @@ class MyServiceMaker(object):
             sys.stderr.write(factory.opt_help)
             sys.stderr.write('\n')
             sys.exit(0)
-
         realm = None
         realm_arg = options.get('realm', None)
         if realm_arg is not None:
@@ -137,14 +133,12 @@ class MyServiceMaker(object):
                     sys.stderr.write("Realm type '%s' is not available.\n" % realm_tag)
                     sys.exit(1)
                 realm = factory.generateRealm(realm_argstr)
-
         # View Provider
         if 'help-view-providers' in options and options['help-view-providers']:    
             sys.stdout.write("Available View Provider Plugins\n") 
             factories = list(getPlugins(IViewProviderFactory))
             txcas.utils.format_plugin_help_list(factories, sys.stdout)
             sys.exit(0) 
-
         if 'help-view-provider' in options and options['help-view-provider'] is not None:
             tag = options['help-view-provider']
             factory = txcas.settings.get_plugin_factory(tag, IViewProviderFactory)
@@ -154,7 +148,6 @@ class MyServiceMaker(object):
             sys.stderr.write(factory.opt_help)
             sys.stderr.write('\n')
             sys.exit(0)
-
         obj = None
         arg = options.get('view-provider', None)
         if arg is not None:
@@ -169,14 +162,12 @@ class MyServiceMaker(object):
                     sys.exit(1)
                 obj = factory.generateViewProvider(argstr)
         view_provider = obj
-
         # Service Manger
         if 'help-service-managers' in options and options['help-service-managers']:    
             sys.stdout.write("Available Service Manager Plugins\n") 
             factories = list(getPlugins(IServiceManagerFactory))
             txcas.utils.format_plugin_help_list(factories, sys.stdout)
             sys.exit(0) 
-
         if 'help-service-manager' in options and options['help-service-manager'] is not None:
             tag = options['help-service-manager']
             factory = txcas.settings.get_plugin_factory(tag, IServiceManagerFactory)
@@ -186,7 +177,6 @@ class MyServiceMaker(object):
             sys.stderr.write(factory.opt_help)
             sys.stderr.write('\n')
             sys.exit(0)
-
         obj = None
         arg = options.get('service-manager', None)
         if arg is not None:
@@ -201,14 +191,12 @@ class MyServiceMaker(object):
                     sys.exit(1)
                 obj = factory.generateServiceManager(argstr)
         service_manager = obj
-
         # Ticket Store
         if 'help-ticket-stores' in options and options['help-ticket-stores']:    
             sys.stdout.write("Available Ticket Store Plugins\n") 
             factories = list(getPlugins(ITicketStoreFactory))
             txcas.utils.format_plugin_help_list(factories, sys.stdout)
             sys.exit(0) 
-
         if 'help-ticket-store' in options and options['help-ticket-store'] is not None:
             ts_tag = options['help-ticket-store']
             factory = txcas.settings.get_plugin_factory(ts_tag, ITicketStoreFactory)
@@ -218,7 +206,6 @@ class MyServiceMaker(object):
             sys.stderr.write(factory.opt_help)
             sys.stderr.write('\n')
             sys.exit(0)
-
         ticket_store = None
         ts_arg = options.get('ticket-store', None)
         if ts_arg is not None:
@@ -232,17 +219,14 @@ class MyServiceMaker(object):
                     sys.stderr.write("Ticket store type '%s' is not available.\n" % ts_tag)
                     sys.exit(1)
                 ticket_store = factory.generateTicketStore(ts_argstr)
-
         # Serve static content?
         static_dir = options.get('static-dir', None)
-
         # Validate pgtUrls?
         dont_validate_pgturl = options.get('dont-validate-pgturl', None)
         if dont_validate_pgturl:
             validate_pgturl = False
         else:
             validate_pgturl = None
-
         # Create the service.
         return CASService(
                 endpoint_options=endpoint_options, 
@@ -259,5 +243,4 @@ class MyServiceMaker(object):
 # Now construct an object which *provides* the relevant interfaces
 # The name of this variable is irrelevant, as long as there is *some*
 # name bound to a provider of IPlugin and IServiceMaker.
-
 serviceMaker = MyServiceMaker()
