@@ -8,9 +8,6 @@ from twisted.cred.error import Unauthorized
 #------------------------------------------------------------------------------
 # REPLACE THIS STUFF WITH YOUR SPECIFICS
 #------------------------------------------------------------------------------
-
-
-
 # What endpoint to listen on
 # E.g. 'ssl:port=443:privateKey=/etc/ssl/server.pem:extraCertChain=/etc/ssl/chain.pem:sslmethod=SSLv3_METHOD:dhParameters=dh_param_1024.pem'
 ENDPOINT = 'tcp:8080'

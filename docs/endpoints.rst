@@ -35,7 +35,7 @@ options on the command line.
 
 .. note::
 
-    By default, an SSL endpoint will negotiate one of of TLSv1, TLSv1.1, or TLSv1.2.
+    By default, an SSL endpoint will negotiate one of of TLSv1.1, or TLSv1.2.
 
 -----------------------------------
 Endpoint Configuration in TAC files

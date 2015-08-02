@@ -40,8 +40,8 @@ The realm options included in txcas are:
 
   The LDAP options are:
 
-  * :option:`host`
-  * :option:`port`
+  * :option:`endpointstr`: A `Twisted endpoint`_ specification describing the
+    client connection to the LDAP service.
   * :option:`basedn`
   * :option:`binddn`
   * :option:`bindpw`
@@ -79,4 +79,5 @@ command::
 
 
 .. _Twisted Cred: https://twistedmatrix.com/documents/14.0.0/core/howto/cred.html
+.. _Twisted endpoint: https://twistedmatrix.com/documents/current/core/howto/endpoints.html#clients
 .. _STARTTLS: http://en.wikipedia.org/wiki/STARTTLS

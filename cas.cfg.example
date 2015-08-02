@@ -25,11 +25,11 @@ path = /path/to/serviceRegistry.json
 verify_cert = 0
 
 [LDAP]
-host = 127.0.0.1
-port = 389
+endpointstr = tcp:host=127.0.0.1:port=389
 basedn = dc=example,dc=org
 binddn = cn=admin,dc=example,dc=org
-bindpw = secret
+bindpw = secret 
+#attribs = givenName,sn,mail
 
 [CouchDB]
 host = 127.0.0.1
