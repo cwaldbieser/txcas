@@ -25,11 +25,6 @@ class Options(usage.Options, strcred.AuthOptionMixin):
 
 
     optFlags = [
-            ["ssl", "s", "Use SSL"],
-            ["sslv3", None, "Allow SSLv3 (not recommended)."],
-            ["tlsv1", None, "Allow TLSv1 (not recommended)."],
-            ["no-tlsv1_1", None, "Do not use TLSv1.1"],
-            ["no-tlsv1_2", None, "Do not use TLSv1.2"],
             ["dont-validate-pgturl", None, "Don't validate pgtUrls."],
             ["help-realms", None, "List user realm plugins available."],
             ["help-ticket-stores", None, "List ticket store plugins available."],
@@ -39,9 +34,7 @@ class Options(usage.Options, strcred.AuthOptionMixin):
         ]
 
     optParameters = [
-                        ["port", "p", 9800, "The port number to listen on.", int],
-                        ["cert-key", "c", None, "An x509 certificate file (PEM format)."],
-                        ["private-key", "k", None, "An x509 private key (PEM format)."],
+                        ["endpoint", "e", "tcp:9800", "The endpoint to listen on."],
                         ["realm", "r", None, "User realm plugin to use."],
                         ["help-realm", None, None, "Help for a specific realm plugin."],
                         ["ticket-store", "t", None, "Ticket store plugin to use."],
@@ -51,58 +44,16 @@ class Options(usage.Options, strcred.AuthOptionMixin):
                         ["view-provider", None, None, "View provider plugin to use."],
                         ["help-view-provider", None, None, "Help for a specific view provider plugin."],
                         ["static-dir", None, None, "Serve static content from STATIC_DIR."],
-                        ["revoked-client-certs", None, None, 
-                            "A file that contains the paths of PEM formated client certificates that have been revoked."],
                     ]
 
-    def __init__(self):
-        usage.Options.__init__(self)
-        self['authorities'] = []
 
-    def opt_addCA(self, pem_path):
-        """
-        Add a trusted CA public cert (PEM format).
-        """
-        self['authorities'].append(pem_path)
-
-    def postOptions(self):
-        if self['ssl']:
-            if self['cert-key'] is None:
-                raise usage.UsageError("An SSL endpoint requires a certificate.")
-            if self['private-key'] is None:
-                raise usage.UsageError("An SSL endpoint requires a private key.")
-
-class MyServiceMaker(object):
+class CASServiceMaker(object):
     implements(IServiceMaker, IPlugin)
     tapname = "cas"
     description = "Central Authentication Service (CAS)."
     options = Options
 
     def makeService(self, options):
-        """
-        Construct a TCPServer from a factory defined in myproject.
-        """
-        # Endpoint
-        ssl_method_options = set(['OP_NO_SSLv3', 'OP_NO_TLSv1'])
-        if options['sslv3']:
-            ssl_method_options.remove('OP_NO_SSLv3')
-        if options['tlsv1']:
-            ssl_method_options.remove('OP_NO_TLSv1')
-        if options['no-tlsv1_1']:
-            ssl_method_options.add('OP_NO_TLSv1_1')
-        if options['no-tlsv1_2']:
-            ssl_method_options.add('OP_NO_TLSv1_2')
-        ssl_method_options = list(ssl_method_options)
-        ssl_method_options.sort()
-        endpoint_options = {
-                'ssl': options['ssl'],
-                'port': options['port'],
-                'certKey': options['cert-key'],
-                'privateKey': options['private-key'],
-                'authorities': options['authorities'],
-                'revoked_client_certs': options['revoked-client-certs'],
-                'ssl_method_options': ssl_method_options,
-            }
         # Credential checkers.
         checkers = options.get("credCheckers", None)
         # Realm
@@ -228,19 +179,19 @@ class MyServiceMaker(object):
         else:
             validate_pgturl = None
         # Create the service.
+        endpoint_str = options['endpoint']
         return CASService(
-                endpoint_options=endpoint_options, 
+                endpoint_str, 
                 checkers=checkers, 
                 realm=realm, 
                 ticket_store=ticket_store,
                 service_manager=service_manager,
                 view_provider=view_provider,
                 static_dir=static_dir,
-                validate_pgturl=validate_pgturl,
-                )
+                validate_pgturl=validate_pgturl,)
 
 
 # Now construct an object which *provides* the relevant interfaces
 # The name of this variable is irrelevant, as long as there is *some*
 # name bound to a provider of IPlugin and IServiceMaker.
-serviceMaker = MyServiceMaker()
+serviceMaker = CASServiceMaker()

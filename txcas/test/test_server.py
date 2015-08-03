@@ -9,14 +9,17 @@ from StringIO import StringIO
 import sys
 from urlparse import urlparse, parse_qs
 from xml.dom.minidom import parseString
-
-
 # Application modules
 from txcas.basic_realm import BasicRealm
 from txcas.casuser import User
 from txcas.client_cert_checker import ClientCertificateChecker
-from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
-                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
+from txcas.constants import (
+    VIEW_LOGIN,
+    VIEW_LOGIN_SUCCESS,
+    VIEW_LOGOUT,
+    VIEW_INVALID_SERVICE,
+    VIEW_ERROR_5XX,
+    VIEW_NOT_FOUND)
 from txcas.couchdb_ticket_store import CouchDBTicketStore
 import txcas.exceptions
 from txcas.in_memory_ticket_store import InMemoryTicketStore
@@ -24,8 +27,6 @@ from txcas.interface import ICASUser, IServiceManager
 from txcas.jinja_view_provider import Jinja2ViewProvider
 from txcas.server import ServerApp 
 from txcas.settings import load_defaults, export_settings_to_dict
-
-
 # External modules
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
 from twisted.cred.error import UnauthorizedLogin, UnhandledCredentials
@@ -45,12 +46,9 @@ from zope.interface.verify import verifyObject
 
 
 def load_config(defaults=None):
-    """
-    """
     scp = load_defaults(defaults)
     path = os.path.join(os.path.dirname(__file__), "tests.cfg")
     scp.read([path])
-    
     return scp
    
 class FakeSubject(object):

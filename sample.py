@@ -1,28 +1,30 @@
 
-
 #Standard library
+from __future__ import print_function
 import cgi
 from textwrap import dedent
 from urllib import urlencode
 import sys
-
 #Application modules
-from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
-                        VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
-from txcas.interface import IRealmFactory, IServiceManagerFactory, \
-                        ITicketStoreFactory
+from txcas.constants import (
+    VIEW_LOGIN, 
+    VIEW_LOGIN_SUCCESS, 
+    VIEW_LOGOUT, 
+    VIEW_INVALID_SERVICE,
+    VIEW_ERROR_5XX,
+    VIEW_NOT_FOUND)
+from txcas.interface import (
+    IRealmFactory,
+    IServiceManagerFactory,
+    ITicketStoreFactory)
 from txcas.server import escape_html
 import txcas.settings
-
 # External modules
 from klein import Klein
 from twisted.web import microdom
 from twisted.web.client import getPage
 
-
 def custom_login(ticket, service, failed, request):
-    """
-    """
     service_lookup = {
         'http://127.0.0.1:9801/landing': 'Cool App #1',
         'http://127.0.0.1:9802/landing': 'Awesome App #2',
@@ -65,10 +67,9 @@ def custom_login(ticket, service, failed, request):
         'service_name': cgi.escape(service_lookup.get(service, "SSO Login"))
     }
 
+
 class MyApp(object):
-
     app = Klein()
-
 
     def __init__(
             self, color, cas_root, allow_sso=True, 
@@ -83,7 +84,6 @@ class MyApp(object):
     @app.route('/')
     def index(self, request):
         session = request.getSession()
-        print request.sitepath
         me = request.URLPath().child('landing')
         service = request.URLPath().path
         if self.act_as_proxy is not None:
@@ -303,7 +303,6 @@ class MyApp(object):
                         'color': self.color,
                         'result': escape_html(str(err.getErrorMessage())), 
                         'proxied_service': escape_html(proxied_service)}
-
             url = self.cas_root + '/proxy'
             q = {
                 'targetService': service_mismatch or proxied_service,
@@ -315,7 +314,7 @@ class MyApp(object):
             d.addCallback(
                     requestService, 
                     proxied_service, 
-                    request_service_endpoint) 
+                    request_service_endpoint)
             d.addCallback(printResult) 
             d.addErrback(printError)
             return d
@@ -332,7 +331,6 @@ class MyApp(object):
                 </html>
                 """) % {
                     'color': self.color,}
-
 
     @app.route('/badproxyticket', methods=['GET'])
     def badproxyticket_GET(self, request):
@@ -370,7 +368,6 @@ class MyApp(object):
         if act_as_link_in_proxy_chain is not None:
             proxied_service = act_as_link_in_proxy_chain['service']
             request_service_endpoint = act_as_link_in_proxy_chain['request_service_endpoint']
-        
         try:
             ticket = request.args['ticket'][0]
         except (KeyError, IndexError):
@@ -379,7 +376,6 @@ class MyApp(object):
         if not ticket:
             request.setResponseCode(400)
             return 'Bad request'
-
         url = self.cas_root + '/proxyValidate'
         q = {
             'service': str(request.URLPath().sibling("landing")),
@@ -387,7 +383,6 @@ class MyApp(object):
         }
         if act_as_link_in_proxy_chain is not None:
             q['pgtUrl'] = str(request.URLPath().sibling("proxycb"))
-            
         params = urlencode(q)
         url += '?' + params
 
@@ -412,7 +407,6 @@ class MyApp(object):
             else:
                 log.msg("[WARNING] Could not corrolate PGTIOU '%s'." % iou)
                 raise Exception("Could not corrolate PGTIOU.")
-                
             # Request the PT.
             url = self.cas_root + '/proxy'
             q = {
@@ -434,7 +428,6 @@ class MyApp(object):
                 raise Exception("Error parsing PT")
             elm = elms[0]
             pt = elm.childNodes[0].value
-            
             # Make the request
             q = {
                 'service': proxied_service,
@@ -445,12 +438,11 @@ class MyApp(object):
             return d
 
         d = getPage(url)
-        
         if act_as_link_in_proxy_chain is not None:
             d.addCallback(requestPT, proxied_service)
             d.addCallback(proxyService, request_service_endpoint, proxied_service)
-
         return d
+
 
 if __name__ == "__main__":
     argv = sys.argv[1:]
@@ -458,7 +450,6 @@ if __name__ == "__main__":
         run_cas_server = False
     else:
         run_cas_server = True
-    
     if run_cas_server:
         # server
         from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
@@ -466,14 +457,12 @@ if __name__ == "__main__":
         from txcas.server import ServerApp
 
         page_views = {VIEW_LOGIN: custom_login}
-
         # Load the config.
         scp = txcas.settings.load_settings('cas', syspath='/etc/cas', defaults={
                 'PLUGINS': {
                     'cred_checker': 'DemoChecker',
                     'realm': 'demo_realm',
                     'ticket_store': 'memory_ticket_store',}})
-
         # Choose plugin that implements IServiceManager.
         service_manager = None
         if scp.has_option('PLUGINS', 'service_manager'):
@@ -486,7 +475,6 @@ if __name__ == "__main__":
                 sys.stderr.write("[ERROR] Service manager type '%s' is not available.\n" % tag)
                 sys.exit(1)
             service_manager = factory.generateServiceManager(args)
-
         # Choose plugin that implements ITicketStore.
         tag_args = scp.get('PLUGINS', 'ticket_store')
         parts = tag_args.split(':')
@@ -497,10 +485,8 @@ if __name__ == "__main__":
             sys.stderr.write("[ERROR] Ticket store type '%s' is not available.\n" % tag)
             sys.exit(1)
         ticket_store = factory.generateTicketStore(args)
-        
         if service_manager is not None:
             ticket_store.service_manager = service_manager
-
         # Choose the plugin that implements IRealm.
         tag_args = scp.get('PLUGINS', 'realm')
         parts = tag_args.split(':')
@@ -512,7 +498,6 @@ if __name__ == "__main__":
             sys.exit(1)
         realm = factory.generateRealm(args)
         assert realm is not None, "User Realm has not been configured!"
-
         # Choose plugin(s) that implement ICredentialChecker 
         try:
             tag_args =  scp.get('PLUGINS', 'cred_checker')
@@ -529,18 +514,20 @@ if __name__ == "__main__":
             checkers= [InMemoryUsernamePasswordDatabaseDontUse(foo='password')]
         else:
             checkers=[f.generateChecker(args) for f in factories]
-
         # Service validation func.
         if service_manager is None:
             validService = lambda x:True
         else:
             validService = service_manager.isValidService
-
         #Create the CAS server app.
-        server_app = ServerApp(ticket_store, realm, checkers, validService,
-                               requireSSL=False, page_views=page_views, validate_pgturl=False)
-
-
+        server_app = ServerApp(
+            ticket_store, 
+            realm, 
+            checkers,
+            validService,
+            requireSSL=False,
+            page_views=page_views,
+            validate_pgturl=False)
     # combines server/app
     from twisted.web.resource import Resource
     from twisted.web.server import Site
@@ -548,11 +535,9 @@ if __name__ == "__main__":
     from twisted.python import log
     import sys
     log.startLogging(sys.stdout)
-
     if run_cas_server:
         # cas server
         reactor.listenTCP(9800, Site(server_app.app.resource()))
-
     # app 1
     app1 = MyApp(
         '#acf', 'http://127.0.0.1:9800',
@@ -560,7 +545,6 @@ if __name__ == "__main__":
             'request_service_endpoint': 'http://127.0.0.1:9804/acceptproxyticket',
             'service': 'http://127.0.0.1:9804/landing',})
     reactor.listenTCP(9801, Site(app1.app.resource()))
-
     # app 2
     app2 = MyApp(
         '#cfc', 'http://127.0.0.1:9800',
@@ -568,15 +552,10 @@ if __name__ == "__main__":
             'request_service_endpoint': 'http://127.0.0.1:9801/acceptproxyticket',
             'service': 'http://127.0.0.1:9801/landing'})
     reactor.listenTCP(9802, Site(app2.app.resource()))
-
     # app 3
     app3 = MyApp('#abc', 'http://127.0.0.1:9800', allow_sso=False)
     reactor.listenTCP(9803, Site(app3.app.resource()))
-
     # app 4
     app4 = MyApp('#9932CC', 'http://127.0.0.1:9800')
     reactor.listenTCP(9804, Site(app4.app.resource()))
-
-
     reactor.run()
-

@@ -1,7 +1,8 @@
 
 from __future__ import print_function
 from functools import partial
-from OpenSSL import SSL
+import glob
+from OpenSSL import crypto, SSL
 import pem
 from twisted.internet.endpoints import SSL4ServerEndpoint
 from twisted.internet.interfaces import (
@@ -9,8 +10,11 @@ from twisted.internet.interfaces import (
     IStreamServerEndpointStringParser,
     IStreamServerEndpoint)
 from twisted.internet import ssl
+from twisted.internet.defer import maybeDeferred
 from twisted.internet.task import LoopingCall
 from twisted.plugin import IPlugin
+from twisted.python.filepath import FilePath
+from twisted.python import log
 from zope.interface import implements
 
 def parseInt_(value, exceptionFactory=None):
@@ -22,6 +26,9 @@ def parseInt_(value, exceptionFactory=None):
         else:
             raise
 
+def pem_cert_to_x509(pem_cert):
+    return crypto.load_certificate(crypto.FILETYPE_PEM, str(pem_cert))
+
 def createSSLContext_(**kwargs):
     privateKey = kwargs.get('privateKey', None)
     assert privateKey is not None, '`tls:` endpoint requires `privateKey` option.'
@@ -30,16 +37,17 @@ def createSSLContext_(**kwargs):
     sslmethod = kwargs.get('sslmethod', None)
     dhParameters = kwargs.get('dhParameters', None)
     authorities_file = kwargs.get('authorities', None)
-    if len(authorities) > 0:
+    if authorities_file is not None:
         verify_client = True
     else:
         verify_client = False
     pem_files = [privateKey, certKey]
     if extraCertChain is not None:
         pem_files.append(extraCertChain)
-    kwds = {method=SSL.SSLv23_METHOD}
+    kwds = {'method': SSL.SSLv23_METHOD}
     if verify_client:
-        authorities = pem.parse_file(authorities_file)
+        authorities = [pem_cert_to_x509(cert)
+            for cert in pem.parse_file(authorities_file)]
         kwds['caCerts'] = authorities
         kwds['verify'] = verify_client
     if dhParameters is not None:
@@ -47,7 +55,7 @@ def createSSLContext_(**kwargs):
     ctxFactory = pem.certificateOptionsFromFiles(
         *pem_files,
         **kwds) 
-    ssl_context = ctx.getContext()
+    ssl_context = ctxFactory.getContext()
     ssl_context.set_options(SSL.OP_NO_SSLv2)
     if sslmethod is not None:
         ssl_method_options = sslmethod.split('+')
@@ -62,7 +70,6 @@ class SSL4ServerEndpointWrapper(object):
 
     def __init__(self, reactor, kwds, revoke_file=None):
         self.wrapped_ = SSL4ServerEndpoint(reactor, **kwds)
-        self.wrapped_ = wrapped
         self.revoke_file = revoke_file
         self.revoke_state = {
             'revoked': set([]),
@@ -74,7 +81,7 @@ class SSL4ServerEndpointWrapper(object):
         ssl_context = ctx.getContext()
         ssl_context.set_verify(SSL.VERIFY_PEER, self.ssl_callback)
 
-    def ssl_callback(conn, x509, errno, errdepth, ok):
+    def ssl_callback(self, conn, x509, errno, errdepth, ok):
         revoke_state = self.revoke_state
         try:
             revoked = revoke_state['revoked']
@@ -102,6 +109,8 @@ class SSL4ServerEndpointWrapper(object):
                 return
             mod_time = fp.getModificationTime()
             if last_mod_time is None or mod_time > last_mod_time:
+                log.msg("[INFO] Loading revoked certificate files specified in '{0}'.".format(
+                    revoke_file))
                 revoke_state['last_mod_time'] = mod_time
                 revoked = set([])
                 with open(revoke_file) as f:
@@ -110,7 +119,8 @@ class SSL4ServerEndpointWrapper(object):
                         if pattern == '' or pattern.startswith('#'):
                             continue
                         for path in glob.glob(pattern):
-                            certs = pem.parse_file(path)
+                            certs = [pem_cert_to_x509(cert)
+                                for cert in pem.parse_file(path)]
                             for certificate in certs:
                                 revoked.add((
                                     tuple(certificate.get_subject().get_components()),
@@ -135,7 +145,7 @@ class SSL4ServerListeningPortWrapper(object):
         return self.wrapped_.startListening()
 
     def stopListening(self):
-        d = maybeDeferred(self.wrapped_.stopListening())
+        d = maybeDeferred(self.wrapped_.stopListening)
         return d
 
     def getHost(self):
@@ -172,6 +182,7 @@ class TLSServerEndpointParser(object):
                 kwds[key] = xlator(value)
         verify_client, ctx = createSSLContext_(**kwargs)
         kwds['sslContextFactory'] = ctx 
+        assert 'port' in kwds, "`tls:` endpoint requires `port`."
         if verify_client:
             revoke_file = kwargs.get('revokeFile', None)
             return SSL4ServerEndpointWrapper(reactor, kwds, revoke_file)
