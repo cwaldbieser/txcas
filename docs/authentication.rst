@@ -43,7 +43,7 @@ forms of authentication succeed will authentication be successful.
 *********************************************
 Typical Models For Trust-Based Authentication
 *********************************************
-Due to the fact that trsut-based authentication can be configure to occur
+Due to the fact that trust-based authentication can be configure to occur
 in either authentication phase, the user experience can vary.
 
 In the **Trust-Only** model, trust based authentication is the only option.
@@ -108,12 +108,13 @@ An authentication method is selected via the :option:`cred_checker` option in th
     authentication will fail.
 * :option:`client_cert`: This form of authentication is trust-based and happens
   during a SSL handshake.  In order for this checker to succeed, 
-  the |project| service must run on a SSL/TLS endpoint.  At least one CA 
+  the |project| service must run on a TLS endpoint.  At least one CA 
   certificate that the server will trust for client certificates must be
-  specified via the option :option:`--addCA`.  Multiple CAs can be specified, 
-  but the user experience may be degraded.  A browser will typically ask the 
-  user to select the certificate that ought to be presented to the server if 
-  multiple valid options are available.
+  specified via the :option:`authorities` option for the endpoint.  Multiple 
+  certificates may be concatenated in the authorities file, but the user 
+  experience may be degraded.  A browser will typically ask the user to select
+  the certificate that ought to be presented to the server if multiple valid
+  options are available.
 
   The options for this plugin are:
 

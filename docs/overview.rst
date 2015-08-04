@@ -13,7 +13,7 @@ implementation of a CAS server using the Twisted Python library.
 Features
 --------
 
-* Implements the `CAS Protocol v3.0`_ required sections (1-3).
+* Implements the CAS Protocol v3.0 required sections (1-3).
 * Easy to start/stop service that listens and responds to incoming requests.
   No external web server or web application container required.
 * Open source Python code making heavy use of the Twisted networking library.
@@ -55,8 +55,7 @@ My goals for this project are as follows:
 * Keep the code base simple to learn and understand.
 * Keep the administration of the service simple to use.
 
-.. _Central Authentication Service: http://jasig.github.io/cas/4.0.0/index.html
-.. _CAS Protocol v3.0: http://jasig.github.io/cas/development/protocol/CAS-Protocol-Specification.html
+.. _Central Authentication Service: http://jasig.github.io/cas/
 .. _Python: https://www.python.org/
 .. _Twisted: https://twistedmatrix.com/trac/
 .. _Apereo Foundation: http://www.apereo.org/

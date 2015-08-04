@@ -61,7 +61,7 @@ The realm options included in txcas are:
   * :option:`aliases`: A comma separated list of aliases that is the same 
     length as the :option:`attribs` option.  Each attribute fetched will
     be mapped to the alias name indicated.
-  * :option:`service_based_attribs`: 1 (Tue) or 0 (False).  Defaults to False.
+  * :option:`service_based_attribs`: 1 (True) or 0 (False).  Defaults to False.
     If this option is selected *and* a service manager plugin is used, the
     service entry for the current service will be used to look up a list
     of attributes or a mapping of attributes-to-aliases.  Whether a list or
