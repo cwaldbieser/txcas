@@ -22,6 +22,6 @@ argparse==1.2.1
 enum34==1.0.4
 idna==2.0
 ipaddress==1.0.14
-ldaptor==0.0.54
+ldaptor==14.0
 requests==2.7.0
 pem==15.0.0
