@@ -84,9 +84,22 @@ An authentication method is selected via the :option:`cred_checker` option in th
   providing colon-separated key=value pairs *or* by configuring options in the
   LDAP section of the main config file (the latter method is preferred).
 
-  Currently, the transport is encrypted after the initial connection is made
-  using `STARTTLS`_.  A 2-stage BIND is used.  In stage 1, an service DN
-  and password are used to BIND in order to serach for the target entry.
+  The initial connection to the server may be unecrypted or encrypted depending
+  on the client endpoint specification used (**tcp** vs. **ssl**).  Although an 
+  initial SSL connection is supported by many directories (the so-called 
+  **ldaps** scheme) this type of connection is not included in the LDAP protocol
+  RFCs.  Instead, the LDAP protocol supports `STARTTLS`_, which establishes a
+  TLS connection *after* the initial connection is made.  
+
+  .. note::
+
+      StartTLS should *not* be used in conjunction with an SSL/TLS endpoint.  
+      Because it establishes a TLS connection in response to a protocol 
+      request, the initial connection should occur on an unencrypted TCP
+      endpoint.
+
+  A 2-stage BIND is used when checking credentials.  In stage 1, an service DN
+  and password are used to BIND in order to search for the target entry.
   If the target entry is located, this authenticator attempts to BIND using
   the password supplied at the CAS login.
 
@@ -106,6 +119,16 @@ An authentication method is selected via the :option:`cred_checker` option in th
     entry where the `uid` attribute matches the provided username.  If no 
     matching entry is located, or if multiple matching entries are located, 
     authentication will fail.
+  * :option:`start_tls`: (Default 0).  1=use StartTLS.  0=don't use StartTLS.
+  * :option:`start_tls_hostname`: If the expected hostname of the directory
+    service is not specified, the StartTLS connection will be encrypted, but
+    not verified.  This will leave the connection vulnerable to 
+    man-in-the-middle (MITM) style attacks.
+  * :option:`start_tls_cacert`: Typically, this option is not required as the
+    LDAP client will use CA certificates based on an OS-specific trust 
+    mechanism (platform trust).  However, if the directory you connect to uses
+    an internal CA certificate, you may specifically indicate a file in PEM
+    format that contains the CA certificate to trust when using StartTLS..
 * :option:`client_cert`: This form of authentication is trust-based and happens
   during a SSL handshake.  In order for this checker to succeed, 
   the |project| service must run on a TLS endpoint.  At least one CA 

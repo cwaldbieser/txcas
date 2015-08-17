@@ -6,14 +6,17 @@ import sys
 from txcas.casuser import User
 from txcas.interface import ICASUser, IRealmFactory, IServiceManagerAcceptor
 # Application modules
-import txcas.settings
+from txcas.settings import get_bool, export_settings_to_dict, load_settings
+import txcas.utils
 # External module
 from ldaptor.protocols.ldap.ldapclient import LDAPClient
 from ldaptor.protocols.ldap import ldapsyntax
 from ldaptor.protocols.ldap.ldaperrors import LDAPInvalidCredentials
+import pem
 from twisted.cred.portal import IRealm
 from twisted.internet import defer, reactor
 from twisted.internet.endpoints import clientFromString, connectProtocol
+from twisted.internet.ssl import Certificate, optionsForClientTLS, platformTrust
 from twisted.plugin import IPlugin
 from zope.interface import implements
 
@@ -51,6 +54,10 @@ def escape_filter_chars(assertion_value,escape_mode=0):
     return s
 
 
+class LDAPTlsAuthorityError(Exception):
+    pass
+
+
 class LDAPRealmFactory(object):
     implements(IPlugin, IRealmFactory)
     tag = "ldap_realm"
@@ -70,12 +77,15 @@ class LDAPRealmFactory(object):
             - aliases: A comma-separated list of aliases.
             - service_based_attribs: Use attributes/aliases from service
               registry entry (found under key 'attributes'.
+            - start_tls: Use StartTLS.
+            - start_tls_hostname: Hostname to use with StartTLS (otherwise TLS is *not* verified).
+            - start_tls_cacert: PEM formatted CA cert file to trust for StartTLS.
             ''')
     opt_usage = '''A colon-separated key=value list.'''
 
     def generateRealm(self, argstring=""):
-        scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
-        settings = txcas.settings.export_settings_to_dict(scp)
+        scp = load_settings('cas', syspath='/etc/cas')
+        settings = export_settings_to_dict(scp)
         ldap_settings = settings.get('LDAP', {})  
         temp = settings.get("LDAPRealm", {})
         ldap_settings.update(temp)
@@ -99,10 +109,10 @@ class LDAPRealmFactory(object):
             aliases = ldap_settings['aliases']
             aliases = aliases.split(',')
             ldap_settings['aliases'] = aliases
-        if 'port' in ldap_settings:
-            ldap_settings['port'] = int(ldap_settings['port'])
         if 'service_based_attribs' in ldap_settings:
-            ldap_settings['service_based_attribs'] = bool(int(ldap_settings['service_based_attribs']))
+            ldap_settings['service_based_attribs'] = get_bool(ldap_settings['service_based_attribs'])
+        if 'start_tls' in ldap_settings:
+            ldap_settings['start_tls'] = get_bool(ldap_settings['start_tls'])
         txcas.utils.filter_args(LDAPRealm.__init__, ldap_settings, ['self'])
         buf = ["[CONFIG][LDAPRealm] Settings:"]
         for k in sorted(ldap_settings.keys()):
@@ -124,7 +134,10 @@ class LDAPRealm(object):
                 query_template='(uid=%(username)s)', 
                 attribs=None, 
                 aliases=None,
-                service_based_attribs=False):
+                service_based_attribs=False,
+                start_tls=False,
+                start_tls_hostname=None,
+                start_tls_cacert=None):
         if attribs is None:
             attribs = []
         # Turn attribs into mapping of attrib_name => alias.
@@ -140,6 +153,20 @@ class LDAPRealm(object):
         self._bindpw = bindpw
         self._query_template = query_template
         self._service_based_attribs = service_based_attribs
+        self._startTls = get_bool(start_tls)
+        self._startTlsAuthority = self.getTlsAuthority_(start_tls_cacert)
+        self._startTlsHostName = start_tls_hostname
+
+    def getTlsAuthority_(self, startTlsCaCert):
+        if startTlsCaCert is None:
+            return None
+        authorities = [str(cert) for cert in pem.parse_file(startTlsCaCert)] 
+        if len(authorities) != 1:
+            raise Exception(
+                ("The provided CA cert file, '{0}', "
+                "contained {1} certificates.  It must contain exactly one.").format(
+                    startTlsCaCert, len(authorities)))
+        return Certificate.loadPEM(authorities[0])
 
     def requestAvatar(self, avatarId, mind, *interfaces):
 
@@ -175,10 +202,22 @@ class LDAPRealm(object):
             attributes = self._attribs
         e = clientFromString(reactor, self._endpointstr)
         client = yield connectProtocol(e, LDAPClient())
-        client = yield client.startTLS()        
+        startTls = self._startTls
+        startTlsHostName = self._startTlsHostName
+        startTlsAuthority = self._startTlsAuthority
+        if startTls:
+            startTlsArgs = []
+            if startTlsHostName is not None:
+                if startTlsAuthority is not None:
+                    ctx = optionsForClientTLS(unicode(startTlsHostName), startTlsAuthority)
+                else:
+                    ctx = optionsForClientTLS(unicode(startTlsHostName), platformTrust())
+                startTlsArgs.append(ctx)
+            client = yield client.startTLS(*startTlsArgs)
         yield client.bind(binddn, bindpw)
         o = ldapsyntax.LDAPEntry(client, basedn)
         results = yield o.search(filterText=query, attributes=attributes.keys())
+        yield client.unbind()
         if len(results) != 1:
             raise Exception("No unique account found for '%s'." % avatarId)
         entry = results[0]

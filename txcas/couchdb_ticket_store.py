@@ -10,12 +10,14 @@ import uuid
 from xml.sax.saxutils import escape as xml_escape
 
 # Application modules
-from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
-                        NotSSOService, InvalidTicketSpec
+from txcas.exceptions import (
+    CASError, InvalidTicket, InvalidService,
+    NotSSOService, InvalidTicketSpec)
 import txcas.http
-from txcas.interface import ITicketStore, ITicketStoreFactory, \
-                            IServiceManagerAcceptor
-import txcas.settings
+from txcas.interface import (
+    ITicketStore, ITicketStoreFactory,
+    IServiceManagerAcceptor)
+from txcas.settings import get_bool, export_settings_to_dict, load_settings
 from txcas.utils import http_status_filter
 
 # External modules
@@ -31,13 +33,10 @@ from zope.interface import implements
 class CouchDBError(Exception):
     pass
 
+
 class CouchDBTicketStoreFactory(object):
-    """
-    """
     implements(IPlugin, ITicketStoreFactory)
-
     tag = "couchdb_ticket_store"
-
     opt_help = dedent('''\
             A ticket store that manages all CAS tickets an external
             CouchDB database.  
@@ -63,10 +62,8 @@ class CouchDBTicketStoreFactory(object):
     opt_usage = '''A colon-separated key=value list.'''
 
     def generateTicketStore(self, argstring=""):
-        """
-        """
-        scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
-        settings = txcas.settings.export_settings_to_dict(scp)
+        scp = load_settings('cas', syspath='/etc/cas')
+        settings = export_settings_to_dict(scp)
         ts_props = settings.get('CAS', {})
         ts_settings = settings.get('CouchDB', {})
         settings_xlate = {
@@ -76,6 +73,7 @@ class CouchDBTicketStoreFactory(object):
                 'user': 'couch_user',
                 'passwd': 'couch_passwd',
                 'https': 'use_https',
+                'debug': '_debug',
             }
         temp = {}
         for k, v in ts_settings.iteritems():
@@ -94,18 +92,19 @@ class CouchDBTicketStoreFactory(object):
                 "Missing the following settings: %s" % ', '.join(missing))
             sys.stderr.write('\n')
             sys.exit(1)
-
         props = (
                 'lt_lifespan', 'st_lifespan', 'pt_lifespan', 
-                'tgt_lifespan', 'pgt_lifespan', 'ticket_size')
+                'tgt_lifespan', 'pgt_lifespan', 'ticket_size', '_debug')
         ts_props = dict((prop, int(ts_props[prop])) for prop in props if prop in ts_props)
         txcas.utils.filter_args(CouchDBTicketStore.__init__, ts_settings, ['self'])
         if 'couch_port' in ts_settings:
             ts_settings['couch_port'] = int(ts_settings['couch_port'])
         if 'use_https' in ts_settings:
-            ts_settings['use_https'] = bool(int(ts_settings['use_https']))
+            ts_settings['use_https'] = get_bool(ts_settings['use_https'])
         if 'verify_cert' in ts_settings:
-            ts_settings['verify_cert'] = bool(int(ts_settings['verify_cert']))
+            ts_settings['verify_cert'] = get_bool(ts_settings['verify_cert'])
+        if '_debug' in ts_settings:
+            ts_settings['_debug'] = get_bool(ts_settings['_debug'])
         obj = CouchDBTicketStore(**ts_settings)
         for prop, value in ts_props.iteritems():
             setattr(obj, prop, value)
@@ -143,7 +142,6 @@ class CouchDBTicketStore(object):
     def __init__(self, couch_host, couch_port, couch_db,
                 couch_user, couch_passwd, use_https=True,
                 reactor=reactor, _debug=False, verify_cert=True):
-
         self.reactor = reactor
         self._debug = _debug
         self._expire_callback = (lambda ticket, data, explicit: None)
@@ -339,23 +337,17 @@ class CouchDBTicketStore(object):
             'db': self._couch_db,
             'docid': _id}
         url = url.encode('utf-8')
-        params = {
-            'rev': _rev.encode('utf-8')
-        }
-
-        self.debug("[DEBUG][CouchDB] _update_ticket(), url: %s" % url)
-        self.debug("[DEBUG][CouchDB] _update_ticket(), params: %s" % str(params))
-
+        data['_rev'] = _rev.encode('utf-8')
         try:
             doc = json.dumps(data)
         except Exception as ex:
             self.debug("[DEBUG][CouchDB] Failed to serialze doc:\n%s" % (str(data)))
             raise
-
         reqlib = self.reqlib
+        self.debug('''[DEBUG][CouchDB] request_method="PUT" url="{0}"'''.format(url))
+        self.debug('''[DEBUG][CouchDB] document => {0}'''.format(data))
         response = yield reqlib.put(
                             url, 
-                            params=params,
                             data=doc, 
                             auth=(self._couch_user, self._couch_passwd),
                             headers=Headers({

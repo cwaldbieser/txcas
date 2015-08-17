@@ -1,7 +1,6 @@
 
 # Standard library
 import inspect
-
 # External modules.
 import treq
 
@@ -56,8 +55,6 @@ def unwrap_failures(err):
     return errs
     
 def get_missing_args(func, provided, exclude=None):
-    """
-    """
     if exclude is None:
         exclude = set([])
     argspec = inspect.getargspec(func)

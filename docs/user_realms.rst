@@ -35,8 +35,19 @@ The realm options included in txcas are:
   providing colon-separated key=value pairs *or* by configuring options in the
   LDAP section of the main config file (the latter method is preferred).
 
-  Currently, the transport is encrypted after the initial connection is made
-  using `STARTTLS`_.
+  The initial connection to the server may be unecrypted or encrypted depending
+  on the client endpoint specification used (**tcp** vs. **ssl**).  Although an 
+  initial SSL connection is supported by many directories (the so-called 
+  **ldaps** scheme) this type of connection is not included in the LDAP protocol
+  RFCs.  Instead, the LDAP protocol supports `STARTTLS`_, which establishes a
+  TLS connection *after* the initial connection is made.  
+
+  .. note::
+
+      StartTLS should *not* be used in conjunction with an SSL/TLS endpoint.  
+      Because it establishes a TLS connection in response to a protocol 
+      request, the initial connection should occur on an unencrypted TCP
+      endpoint.
 
   The LDAP options are:
 
@@ -69,6 +80,16 @@ The realm options included in txcas are:
     service registry entry.  If that key is not present for a particular entry
     the :option:`attribs` and :option:`aliases` options above will be used to
     compute the attributes to add to the realm.
+  * :option:`start_tls`: (Default 0).  1=use StartTLS.  0=don't use StartTLS.
+  * :option:`start_tls_hostname`: If the expected hostname of the directory
+    service is not specified, the StartTLS connection will be encrypted, but
+    not verified.  This will leave the connection vulnerable to 
+    man-in-the-middle (MITM) style attacks.
+  * :option:`start_tls_cacert`: Typically, this option is not required as the
+    LDAP client will use CA certificates based on an OS-specific trust 
+    mechanism (platform trust).  However, if the directory you connect to uses
+    an internal CA certificate, you may specifically indicate a file in PEM
+    format that contains the CA certificate to trust when using StartTLS..
 
 If you have added additional plugins to your :file:`$TXCAS/twisted/plugins` 
 folder, additional option values may be available.  The plugin documentation 

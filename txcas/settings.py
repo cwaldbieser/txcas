@@ -110,17 +110,24 @@ def get_plugins_by_predicate(iface, predicate):
     return results
 
 def dump_settings(scp):
-    """
-    """
     for section in scp.sections():
         for option in scp.options(section):
             print "%s, %s: %s" % (section, option, scp.get(section, option))
 
 def export_settings_to_dict(scp):
-    """
-    """
     settings = {}
     for section in scp.sections():
         for option in scp.options(section):
             settings.setdefault(section, {})[option] = scp.get(section, option)
     return settings
+
+def get_bool(value, default=False):
+    if value is None:
+        return False
+    value = str(value).strip().lower()
+    if value in ('y', '1', 't', 'yes', 'true'):
+        return True
+    elif value in ('n', '0', 'f', 'no', 'false'):
+        return False
+    else:
+        return default

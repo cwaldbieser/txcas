@@ -3,11 +3,12 @@
 from textwrap import dedent
 import sys
 # Application modules
-import txcas.settings
+from txcas.settings import get_bool, export_settings_to_dict, load_settings
 import txcas.utils
 # External modules
 from ldaptor.protocols.ldap.ldapclient import LDAPClient
 from ldaptor.protocols.ldap import ldapsyntax
+import pem
 from ldaptor.protocols.ldap.ldaperrors import LDAPInvalidCredentials
 from twisted.cred import credentials
 from twisted.cred.checkers import ICredentialsChecker
@@ -15,6 +16,7 @@ from twisted.cred.error import UnauthorizedLogin
 from twisted.cred.strcred import ICheckerFactory
 from twisted.internet import defer, reactor
 from twisted.internet.endpoints import clientFromString, connectProtocol
+from twisted.internet.ssl import Certificate, optionsForClientTLS, platformTrust
 from twisted.plugin import IPlugin
 from twisted.python import log
 from zope.interface import implements
@@ -55,26 +57,48 @@ def escape_filter_chars(assertion_value,escape_mode=0):
         s = s.replace('\x00', r'\00')
     return s
 
-#==============================================================================
-#==============================================================================
 
 class LDAPAdminBindError(Exception):
     pass
 
-#==============================================================================
-#==============================================================================
+
+class LDAPTlsAuthorityError(Exception):
+    pass
+
 
 class LDAPSimpleBindChecker(object):
-
     implements(IPlugin, ICredentialsChecker)
     credentialInterfaces = (credentials.IUsernamePassword,)
 
-    def __init__(self, endpointstr, basedn, binddn, bindpw, query_template='(uid=%(username)s)'):
+    def __init__(
+            self, 
+            endpointstr, 
+            basedn, 
+            binddn, 
+            bindpw, 
+            query_template='(uid=%(username)s)',
+            start_tls=False,
+            start_tls_hostname=None,
+            start_tls_cacert=None):
         self._endpointstr = endpointstr
         self._basedn = basedn
         self._binddn = binddn
         self._bindpw = bindpw
         self._query_template = query_template
+        self._startTls = get_bool(start_tls)
+        self._startTlsAuthority = self.getTlsAuthority_(start_tls_cacert)
+        self._startTlsHostName = start_tls_hostname
+
+    def getTlsAuthority_(self, startTlsCaCert):
+        if startTlsCaCert is None:
+            return None
+        authorities = [str(cert) for cert in pem.parse_file(startTlsCaCert)] 
+        if len(authorities) != 1:
+            raise Exception(
+                ("The provided CA cert file, '{0}', "
+                "contained {1} certificates.  It must contain exactly one.").format(
+                    startTlsCaCert, len(authorities)))
+        return Certificate.loadPEM(authorities[0])
 
     def requestAvatarId(self, credentials):
         def eb(err):
@@ -89,9 +113,21 @@ class LDAPSimpleBindChecker(object):
         basedn = self._basedn
         e = clientFromString(reactor, self._endpointstr)
         client = yield connectProtocol(e, LDAPClient())
-        client = yield client.startTLS()
+        startTls = self._startTls
+        startTlsHostName = self._startTlsHostName
+        startTlsAuthority = self._startTlsAuthority
+        if startTls:
+            startTlsArgs = []
+            if startTlsHostName is not None:
+                if startTlsAuthority is not None:
+                    ctx = optionsForClientTLS(unicode(startTlsHostName), startTlsAuthority)
+                else:
+                    ctx = optionsForClientTLS(unicode(startTlsHostName), platformTrust())
+                startTlsArgs.append(ctx)
+            client = yield client.startTLS(*startTlsArgs)
         dn = yield self._get_dn(client, credentials.username)
         yield client.bind(dn, credentials.password)
+        yield client.unbind()
         defer.returnValue(credentials.username)
         
     @defer.inlineCallbacks
@@ -147,8 +183,8 @@ class LDAPSimpleBindCheckerFactory(object):
 
     # This will be called once per command-line.
     def generateChecker(self, argstring=""):
-        scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
-        settings = txcas.settings.export_settings_to_dict(scp)
+        scp = load_settings('cas', syspath='/etc/cas')
+        settings = export_settings_to_dict(scp)
         ldap_settings = settings.get('LDAP', {})    
         if argstring.strip() != "":
             argdict = dict((x.split('=') for x in argstring.split(':')))
