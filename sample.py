@@ -1,11 +1,11 @@
+#! /usr/bin/env python
 
-#Standard library
 from __future__ import print_function
+import argparse
 import cgi
 from textwrap import dedent
 from urllib import urlencode
 import sys
-#Application modules
 from txcas.constants import (
     VIEW_LOGIN, 
     VIEW_LOGIN_SUCCESS, 
@@ -19,8 +19,8 @@ from txcas.interface import (
     ITicketStoreFactory)
 from txcas.server import escape_html
 import txcas.settings
-# External modules
 from klein import Klein
+from twisted.python import log
 from twisted.web import microdom
 from twisted.web.client import getPage
 
@@ -444,12 +444,9 @@ class MyApp(object):
         return d
 
 
-if __name__ == "__main__":
-    argv = sys.argv[1:]
-    if len(argv) > 0 and argv[0] == "nocas":
-        run_cas_server = False
-    else:
-        run_cas_server = True
+def main(args):
+    run_cas_server = not args.no_cas
+    cas_base_url = args.cas_base_url
     if run_cas_server:
         # server
         from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
@@ -540,22 +537,36 @@ if __name__ == "__main__":
         reactor.listenTCP(9800, Site(server_app.app.resource()))
     # app 1
     app1 = MyApp(
-        '#acf', 'http://127.0.0.1:9800',
+        '#acf', cas_base_url,
         act_as_link_in_proxy_chain={
             'request_service_endpoint': 'http://127.0.0.1:9804/acceptproxyticket',
             'service': 'http://127.0.0.1:9804/landing',})
     reactor.listenTCP(9801, Site(app1.app.resource()))
     # app 2
     app2 = MyApp(
-        '#cfc', 'http://127.0.0.1:9800',
+        '#cfc', cas_base_url,
         act_as_proxy={
             'request_service_endpoint': 'http://127.0.0.1:9801/acceptproxyticket',
             'service': 'http://127.0.0.1:9801/landing'})
     reactor.listenTCP(9802, Site(app2.app.resource()))
     # app 3
-    app3 = MyApp('#abc', 'http://127.0.0.1:9800', allow_sso=False)
+    app3 = MyApp('#abc', cas_base_url, allow_sso=False)
     reactor.listenTCP(9803, Site(app3.app.resource()))
     # app 4
-    app4 = MyApp('#9932CC', 'http://127.0.0.1:9800')
+    app4 = MyApp('#9932CC', cas_base_url)
     reactor.listenTCP(9804, Site(app4.app.resource()))
     reactor.run()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--no-cas",
+        action='store_true',
+        help='Only run the service providers and *not* the CAS service.')
+    parser.add_argument(
+        "--cas-base-url",
+        action="store",
+        default='http://127.0.0.1:9800',
+        help="The base CAS service URL (default http://127.0.0.1:9800).")
+    args = parser.parse_args()
+    main(args)

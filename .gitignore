@@ -4,3 +4,4 @@ _trial_temp
 *.cfg
 *.tac
 *.json
+docs/_build/*

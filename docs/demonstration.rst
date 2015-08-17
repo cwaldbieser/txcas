@@ -58,8 +58,10 @@ Experimenting With the Demonstration
 
 The demonstration program honors any plugin and option settings made in the main
 txcas configuration file.  You can try out plugins and options with the demo 
-services.  If you run :program:`sample.py` with the `nocas` command line 
-argument, the services will be started *without* the CAS service.  You can run
-the CAS service in another console and observe how the program interact.
+services.  If you run :program:`sample.py` with the :option:`--no-cas` command line 
+option, the services will be started *without* the CAS service.  You can run
+the CAS service in another console and observe how the program interact.  The
+:option:`--cas-base-url` option lets you specify the base CAS service URL.  This
+is useful if you want to run the CAS service on a different host and/or port.
 
 
