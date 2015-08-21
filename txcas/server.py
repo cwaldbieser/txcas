@@ -309,7 +309,6 @@ class ServerApp(object):
                     break
         return found
 
-
     def _set_response_code_filter(self, result, code, request, msg=None):
         """
         Set the response code during deferred chain processing.
@@ -326,8 +325,6 @@ class ServerApp(object):
         return err
 
     def _get_page_view(self, symbol, *args):
-        """
-        """
         def eb(err, symbol, *args):
             err.trap(ViewNotImplementedError) 
             log.err(err)            
@@ -339,20 +336,14 @@ class ServerApp(object):
         return d
 
     def _page_view_callback(self, _, symbol, *args):
-        """
-        """
         d = self._get_page_view(symbol, *args)
         return d
 
     def _page_view_result_callback(self, result, symbol, *args):
-        """
-        """
         d = self._get_page_view(symbol, result, *args)
         return d
 
     def _page_view_errback(self, err, symbol, *args):
-        """
-        """
         d = self._get_page_view(symbol, err, *args) 
         return d
 
@@ -413,7 +404,6 @@ class ServerApp(object):
             transport = request.channel.transport
         else:
             raise Unauthorized("Could not get transport from request!")
-            
         mind = {'service': service}
 
         def log_auth(avatar_id, request):
@@ -421,7 +411,6 @@ class ServerApp(object):
             log_cas_event("Authenticated via Trust", [
                         ('client_ip', client_ip), ('username', avatar_id)])
             return avatar_id
-
 
         d = portal.login(transport, mind, ICASUser)
         d.addCallback(lambda x: x[1].username)
@@ -432,9 +421,6 @@ class ServerApp(object):
         tgc = request.getCookie(self.cookie_name)
         if not tgc:
             return defer.fail(CookieAuthFailed("No cookie"))
-        # Q: Should the ticket-granting cookie be checked for expiration?
-        # I think a browser won't send expired cookies.  Anyway, expiration
-        # should happen on the server.
         service = get_single_param_or_default(request, 'service', "")
 
         def log_tgc_auth(result, request):
@@ -499,7 +485,6 @@ class ServerApp(object):
         d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
         return d
             
-
     def _authenticated(self, avatar_id, primaryCredentials, service, request):
         """
         Call this after authentication has succeeded to finish the request.
@@ -555,9 +540,10 @@ class ServerApp(object):
                 log.msg('''[WARN] warning="Removed 'ticket' parameter from service URL '%s'."  client_ip="%s" username="%s"''' % (
                     service, request.getClientIP(), avatar_id))
             query['ticket'] = ticket
-            param_str = urlencode(query)
+            param_str = urlencode(query, doseq=True)
             p = urlparse.ParseResult(*tuple(p[:4] + (param_str,) + p[5:]))
             service_url = urlparse.urlunparse(p)
+            log.msg("[DEBUG] Redirecting to: '{0}'.".format(service_url))
             request.redirect(service_url)
 
         d = maybeAddCookie(avatar_id, service, request)
@@ -570,7 +556,6 @@ class ServerApp(object):
             d.addCallback(self.realm.requestAvatar, mind, ICASUser)
             d.addCallback(extract_avatar)
             d.addCallback(self._page_view_result_callback, VIEW_LOGIN_SUCCESS, request)
-            
         d.addErrback(self._log_failure_filter, request)
         d.addErrback(self._set_response_code_filter, 500, request)
         d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)

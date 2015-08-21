@@ -29,18 +29,16 @@ def request(method, url, headers=None, params=None, data=None, auth=None, timeou
     agent_args = [reactor]
     contextFactory = WebClientContextFactory()
     agent_args.append(contextFactory)
-        
     body = None
     if data is not None:
         body = FileBodyProducer(StringIO(data))
     if params is not None:
         if p.params == '':
-            param_str = urlencode(params)
+            param_str = urlencode(params, doseq=True)
         else:
-            param_str = p.params + '&' + urlencode(params)
+            param_str = p.params + '&' + urlencode(params, doseq=True)
         p = urlparse.ParseResult(*tuple(p[:4] + (param_str,) + p[5:]))
         url = urlparse.urlunparse(p)
-
     if auth is not None:
         auth = "%s:%s" % auth
         b64auth = base64.b64encode(auth)

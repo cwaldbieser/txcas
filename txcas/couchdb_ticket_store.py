@@ -588,6 +588,8 @@ class CouchDBTicketStore(object):
             d = self._useTicket(ticket)
             def cb(data):
                 if data[u'service'] != service:
+                    log.msg("[WARNING] ST service '{0}' != /serviceValidate service '{1}'".format(
+                        data[u'service'], service))
                     return defer.fail(InvalidService())
                 if requirePrimaryCredentials and data['primary_credentials'] == False:
                     return defer.fail(InvalidTicket("This ticket was not issued in response to primary credentials."))
