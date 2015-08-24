@@ -8,7 +8,6 @@ import sys
 from textwrap import dedent
 import uuid
 from xml.sax.saxutils import escape as xml_escape
-
 # Application modules
 from txcas.exceptions import (
     CASError, InvalidTicket, InvalidService,
@@ -18,6 +17,7 @@ from txcas.interface import (
     ITicketStore, ITicketStoreFactory,
     IServiceManagerAcceptor)
 from txcas.settings import get_bool, export_settings_to_dict, load_settings
+from txcas.urls import are_urls_equal
 from txcas.utils import http_status_filter
 
 # External modules
@@ -154,12 +154,10 @@ class CouchDBTicketStore(object):
             self.reqlib = treq
         else:
             self.reqlib = txcas.http
-
         if use_https:
             self._scheme = 'https://'
         else:
             self._scheme = 'http://'
-            
         reactor.callLater(self.poll_expired, self._clean_expired)
        
     def _getServiceValidator(self):
@@ -197,10 +195,8 @@ class CouchDBTicketStore(object):
                     'descending': 'true',
                     'startkey': json.dumps(earliest.strftime("%Y-%m-%dT%H:%M:%S")),
                     }
-
             self.debug("[DEBUG][CouchDB] _clean_expired(), url: %s" % url)
             self.debug("[DEBUG][CouchDB] _clean_expired(), params: %s" % str(params))
-
             reqlib = self.reqlib
             response = yield reqlib.get(url, 
                         params=params, 
@@ -271,7 +267,6 @@ class CouchDBTicketStore(object):
             'db': self._couch_db}
         url = url.encode('utf-8')
         doc = json.dumps(data)
-
         self.debug("[DEBUG][CouchDB] _mkTicket(): url: %s" % url)
         self.debug("[DEBUG][CouchDB] _mkTicket(): doc: %s" % doc)
         
@@ -287,7 +282,6 @@ class CouchDBTicketStore(object):
         d.addCallback(http_status_filter, [(201,201)], CouchDBError)
         d.addCallback(reqlib.content)
         d.addCallback(return_ticket, ticket)
-        
         return d
 
     @defer.inlineCallbacks
@@ -302,10 +296,8 @@ class CouchDBTicketStore(object):
             'db': self._couch_db}
         url = url.encode('utf-8')
         params = {'key': json.dumps(ticket.encode('utf-8'))}
-
         self.debug("[DEBUG][CouchDB] _fetch_ticket(), url: %s" % url)
         self.debug("[DEBUG][CouchDB] _fetch_ticket(), params: %s" % str(params))
-
         reqlib = self.reqlib
         response = yield reqlib.get(url, 
                     params=params, 
@@ -370,10 +362,8 @@ class CouchDBTicketStore(object):
             'docid': _id}
         url = url.encode('utf-8')
         params = {'rev': _rev}
-
         self.debug('[DEBUG][CouchDB] _delete_ticket(), url: %s' % url)
         self.debug('[DEBUG][CouchDB] _delete_ticket(), params: %s' % str(params))
-
         reqlib = self.reqlib
         response = yield reqlib.delete(
                             url,
@@ -498,14 +488,17 @@ class CouchDBTicketStore(object):
         """
         if not ticket.startswith("LT-"):
             return defer.fail(InvalidTicket())
+
         def doit(_):
             d = self._useTicket(ticket)
+
             def cb(data):
                 recorded_service = data[u'service']
-                if recorded_service != service:
+                if not are_urls_equal(recorded_service, service):
                     return defer.fail(InvalidService(
-                        "Recorded service '%s' does not match presented service '%s'." % (
+                        "Issued service '%s' does not match presented service '%s'." % (
                             recorded_service, service)))
+
             return d.addCallback(cb)
         return self._validService(service).addCallback(doit)
 
@@ -538,7 +531,6 @@ class CouchDBTicketStore(object):
         """
         if not ticket.startswith("ST-"):
             return defer.fail(InvalidTicketSpec())
-
         return self._useServiceOrProxyTicket(ticket, service, requirePrimaryCredentials)
 
     @defer.inlineCallbacks
@@ -586,18 +578,20 @@ class CouchDBTicketStore(object):
                 
         def doit(_):
             d = self._useTicket(ticket)
+
             def cb(data):
-                if data[u'service'] != service:
+                if not are_urls_equal(data[u'service'], service):
                     log.msg("[WARNING] ST service '{0}' != /serviceValidate service '{1}'".format(
                         data[u'service'], service))
-                    return defer.fail(InvalidService())
+                    return defer.fail(InvalidService(
+                        "Issued service does not match validation service."))
                 if requirePrimaryCredentials and data['primary_credentials'] == False:
                     return defer.fail(InvalidTicket("This ticket was not issued in response to primary credentials."))
                 return data
+
             return d.addCallback(cb)
             
-        return self._validService(service).addCallback(
-            doit)
+        return self._validService(service).addCallback(doit)
 
     @defer.inlineCallbacks
     def mkProxyGrantingTicket(self, service, ticket, tgt, pgturl, proxy_chain=None):
@@ -639,11 +633,11 @@ class CouchDBTicketStore(object):
         """
         return self._mkTicket('TGC-', {'avatar_id': avatar_id}, timeout=self.tgt_lifespan)
 
-
     def useTicketGrantingCookie(self, ticket, service):
         """
         Get the user associated with this ticket.
         """
+
         def use_ticket_cb(_): 
             return self._useTicket(ticket, _consume=False)
             
@@ -658,8 +652,8 @@ class CouchDBTicketStore(object):
         """
         if not ticket.startswith("TGC-"):
             return defer.fail(InvalidTicket())
-        
         d = self._useTicket(ticket)
+
         def cb(data):
             """
             Expire associated PGTs.
@@ -690,9 +684,8 @@ class CouchDBTicketStore(object):
             <samlp:SessionIndex>%(service_ticket)s</samlp:SessionIndex>
         </samlp:LogoutRequest>
         """)
+
     def _notifyServicesSLO(self, services):
-        """
-        """
         template = self._samlLogoutTemplate
         dlist = []
         for service, st in services.iteritems():

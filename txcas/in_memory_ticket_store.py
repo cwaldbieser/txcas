@@ -7,7 +7,6 @@ import sys
 from textwrap import dedent
 import uuid
 from xml.sax.saxutils import escape as xml_escape
-
 # Application modules
 from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         NotSSOService, InvalidTicketSpec
@@ -15,7 +14,7 @@ import txcas.http
 from txcas.interface import ITicketStore, ITicketStoreFactory, \
                             IServiceManagerAcceptor
 import txcas.settings
-
+from txcas.urls import are_urls_equal
 # External modules
 import treq
 from twisted.internet import defer, reactor
@@ -27,9 +26,7 @@ from zope.interface import implements
 
 class InMemoryTicketStoreFactory(object):
     implements(IPlugin, ITicketStoreFactory)
-
     tag = "memory_ticket_store"
-
     opt_help = dedent('''\
             A ticket store that manages all CAS tickets in local
             memory.  It is easy to configure and quick to retreive
@@ -46,12 +43,9 @@ class InMemoryTicketStoreFactory(object):
             - ticket_size
             - verify_cert 
             ''')
-
     opt_usage = '''A colon-separated key=value list.'''
 
     def generateTicketStore(self, argstring=""):
-        """
-        """
         scp = txcas.settings.load_settings('cas', syspath='/etc/cas')
         settings = txcas.settings.export_settings_to_dict(scp)
         ts_settings = settings.get('CAS', {})    
@@ -69,7 +63,6 @@ class InMemoryTicketStoreFactory(object):
                 "Missing the following settings: %s" % ', '.join(missing))
             sys.stderr.write('\n') 
             sys.exit(1)
-    
         props = (
                 'lt_lifespan', 'st_lifespan', 'pt_lifespan',
                 'tgt_lifespan', 'pgt_lifespan', 'ticket_size')
@@ -96,7 +89,6 @@ class InMemoryTicketStore(object):
     A ticket store that exists entirely in system memory.
     """
     implements(IPlugin, ITicketStore, IServiceManagerAcceptor)
-
     lt_lifespan = 60 * 5
     st_lifespan = 10
     pt_lifespan = 10
@@ -104,7 +96,6 @@ class InMemoryTicketStore(object):
     pgt_lifespan = 60 * 60 * 2
     ticket_size = 256
     charset = string.ascii_letters + string.digits + '-'
-    
     service_manager = None
 
     def __init__(self, reactor=reactor, verify_cert=True, _debug=False):
@@ -137,6 +128,7 @@ class InMemoryTicketStore(object):
             log.msg(msg)
 
     def _validService(self, service):
+
         def cb(result):
             if not result:
                 return defer.fail(InvalidService(
@@ -146,9 +138,11 @@ class InMemoryTicketStore(object):
         return defer.maybeDeferred(self._getServiceValidator(), service).addCallback(cb)
 
     def _isSSOService(self, service):
+
         def cb(result):
             if not result:
                 return defer.fail(NotSSOService(service))
+
         return defer.maybeDeferred(self._getServiceSSOPredicate(), service).addCallback(cb)
 
     def _generate(self, prefix):
@@ -157,7 +151,6 @@ class InMemoryTicketStore(object):
         while len(r) < size:
             r.append(random.choice(self.charset))
         return ''.join(r)
-
 
     def _mkTicket(self, prefix, data, timeout):
         """
@@ -180,7 +173,6 @@ class InMemoryTicketStore(object):
         self._delays[ticket] = (dc, timeout)
         return defer.succeed(ticket)
 
-
     def expireTicket(self, val):
         """
         This function should only be called when a ticket is expired via
@@ -194,7 +186,6 @@ class InMemoryTicketStore(object):
         except KeyError:
             pass
         self.debug("Expired ticket '%s'." % val)
-
 
     def _useTicket(self, ticket, _consume=True):
         """
@@ -240,7 +231,6 @@ class InMemoryTicketStore(object):
             return defer.fail(InvalidTicket("PGT '%s' is not valid." % pgt))
         if not tgt.startswith("TGC-"):
             return defer.fail(InvalidTicket("TGT '%s' is not valid." % tgt))
-            
         try:
             data = self._tickets[tgt]
         except KeyError:
@@ -261,24 +251,26 @@ class InMemoryTicketStore(object):
             }, timeout=self.lt_lifespan)
         return d.addCallback(cb)
 
-
     def useLoginTicket(self, ticket, service):
         """
         Use a login ticket.
         """
         if not ticket.startswith("LT-"):
             return defer.fail(InvalidTicket("Login ticket '%s' is malformed." % ticket))
+
         def doit(_):
             d = self._useTicket(ticket)
+
             def cb(data):
                 recorded_service = data['service']
-                if recorded_service != service:
+                if not are_urls_equal(recorded_service, service):
                     return defer.fail(InvalidService(
-                        "Recorded service '%s' does not match presented service '%s'." % (
+                        "Issued service '%s' does not match presented service '%s'." % (
                             recorded_service, service)))
-            return d.addCallback(cb)
-        return self._validService(service).addCallback(doit)
 
+            return d.addCallback(cb)
+
+        return self._validService(service).addCallback(doit)
 
     def mkServiceTicket(self, service, tgt_id, primaryCredentials):
         """
@@ -298,12 +290,11 @@ class InMemoryTicketStore(object):
                 'primary_credentials': primaryCredentials,
                 'tgt': tgt_id,
             }, timeout=self.st_lifespan)
+
         d = self._validService(service)
         d.addCallback(doit)
         d.addCallback(self._informTGTOfService, service, tgt_id)
-        
         return d
-
 
     def useServiceTicket(self, ticket, service, requirePrimaryCredentials=False):
         """
@@ -311,7 +302,6 @@ class InMemoryTicketStore(object):
         """
         if not ticket.startswith("ST-"):
             return defer.fail(InvalidTicketSpec())
-
         return self._useServiceOrProxyTicket(ticket, service, requirePrimaryCredentials)
 
     def mkProxyTicket(self, service, pgt):
@@ -320,13 +310,11 @@ class InMemoryTicketStore(object):
         """
         if not pgt.startswith("PGT-"):
             return defer.fail(InvalidTicket())
-
         try:
             pgt_info = self._tickets[pgt]
         except KeyError:
             return defer.fail(InvalidTicket("PGT '%s' is invalid." % pgt))
         pgturl = pgt_info['pgturl']
-
         try:
             tgt = pgt_info['tgt']
         except KeyError:
@@ -342,10 +330,10 @@ class InMemoryTicketStore(object):
                 'tgt': tgt,
                 'proxy_chain': pgt_info['proxy_chain'],
             }, timeout=self.pt_lifespan)
+
         d = self._validService(service)
         d.addCallback(doit)
         d.addCallback(self._informTGTOfService, service, tgt)
-        
         return d
 
     def useServiceOrProxyTicket(self, ticket, service, requirePrimaryCredentials=False):
@@ -364,13 +352,17 @@ class InMemoryTicketStore(object):
                 
         def doit(_):
             d = self._useTicket(ticket)
+
             def cb(data):
-                if data['service'] != service:
-                    return defer.fail(InvalidService())
+                if not are_urls_equal(data['service'], service):
+                    return defer.fail(InvalidService(
+                        "Issued service does not match presented service."))
                 if requirePrimaryCredentials and data['primary_credentials'] == False:
                     return defer.fail(InvalidTicket("This ticket was not issued in response to primary credentials."))
                 return data
+
             return d.addCallback(cb)
+
         return self._validService(service).addCallback(doit)
 
     def mkProxyGrantingTicket(self, service, ticket, tgt, pgturl, proxy_chain=None):
@@ -379,7 +371,6 @@ class InMemoryTicketStore(object):
         """
         if not (ticket.startswith("ST-") or ticket.startswith("PT-")):
             return defer.fail(InvalidTicket())
-        
         try:
             tgt_info = self._tickets[tgt]
         except KeyError:
@@ -418,11 +409,11 @@ class InMemoryTicketStore(object):
         """
         return self._mkTicket('TGC-', {'avatar_id': avatar_id}, timeout=self.tgt_lifespan)
 
-
     def useTicketGrantingCookie(self, ticket, service):
         """
         Get the user associated with this ticket.
         """
+
         def use_ticket_cb(_): 
             return self._useTicket(ticket, _consume=False)
             
@@ -437,8 +428,8 @@ class InMemoryTicketStore(object):
         """
         if not ticket.startswith("TGC-"):
             return defer.fail(InvalidTicket())
-        
         d = self._useTicket(ticket)
+
         def cb(data):
             """
             Expire associated PGTs.
@@ -470,9 +461,8 @@ class InMemoryTicketStore(object):
             <samlp:SessionIndex>%(service_ticket)s</samlp:SessionIndex>
         </samlp:LogoutRequest>
         """)
+
     def _notifyServicesSLO(self, services):
-        """
-        """
         template = self._samlLogoutTemplate
         dlist = []
         for service, st in services.iteritems():
@@ -480,7 +470,6 @@ class InMemoryTicketStore(object):
             dt = datetime.datetime.utcnow()
             issue_instant = dt.strftime("%Y-%m-%dT%H:%M:%S")
             identifier = str(uuid.uuid4())
-            
             data = template % {
                 'identifier': xml_escape(identifier),
                 'issue_instant': xml_escape(issue_instant),
@@ -507,4 +496,3 @@ class InMemoryTicketStore(object):
         implicitly expired (e.g. timeout or parent ticket expired).
         """
         self._expire_callback = callback
-        
