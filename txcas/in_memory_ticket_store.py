@@ -1,5 +1,6 @@
 
 # Standard library
+from __future__ import print_function
 import datetime
 import random
 import string
@@ -8,16 +9,18 @@ from textwrap import dedent
 import uuid
 from xml.sax.saxutils import escape as xml_escape
 # Application modules
-from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
-                        NotSSOService, InvalidTicketSpec
-import txcas.http
-from txcas.interface import ITicketStore, ITicketStoreFactory, \
-                            IServiceManagerAcceptor
+from txcas.exceptions import (
+    CASError, InvalidTicket, InvalidService,
+    NotSSOService, InvalidTicketSpec)
+from txcas.http import (
+    createNonVerifyingHTTPClient, createVerifyingHTTPClient)
+from txcas.interface import (
+    ITicketStore, ITicketStoreFactory, IServiceManagerAcceptor)
 import txcas.settings
 from txcas.urls import are_urls_equal
 # External modules
 import treq
-from twisted.internet import defer, reactor
+from twisted.internet import defer
 from twisted.plugin import IPlugin
 from twisted.python import log
 from twisted.web.http_headers import Headers
@@ -98,16 +101,18 @@ class InMemoryTicketStore(object):
     charset = string.ascii_letters + string.digits + '-'
     service_manager = None
 
-    def __init__(self, reactor=reactor, verify_cert=True, _debug=False):
+    def __init__(self, reactor=None, verify_cert=True, _debug=False):
+        if reactor is None:
+            from twisted.internet import reactor
         self.reactor = reactor
         self._tickets = {}
         self._delays = {}
         self._debug = _debug
         self._expire_callback = (lambda ticket, data, explicit: None)
         if verify_cert:
-            self.reqlib = treq
+            self.httpClientFactory = createVerifyingHTTPClient
         else:
-            self.reqlib = txcas.http
+            self.httpClientFactory = createNonVerifyingHTTPClient
 
     def _getServiceValidator(self):
         service_mgr = self.service_manager
@@ -475,14 +480,14 @@ class InMemoryTicketStore(object):
                 'issue_instant': xml_escape(issue_instant),
                 'service_ticket': xml_escape(st)
             }
-            reqlib = self.reqlib
+            httpClient = self.httpClientFactory(self.reactor)
             log.msg("[INFO] Making SLO callback to URL '%s' with ticket '%s' and instant '%s'." % (
                 service, st, issue_instant))
-            d = reqlib.post(
+            d = httpClient.post(
                     service, 
                     headers=Headers({'Content-Type': ['application/xml']}),
                     data=data, 
-                    timeout=30).addCallback(reqlib.content)
+                    timeout=30).addCallback(treq.content)
             dlist.append(d)
         return defer.DeferredList(dlist, consumeErrors=True)
 

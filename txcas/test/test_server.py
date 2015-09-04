@@ -1,5 +1,6 @@
 
 # Standard modules
+from __future__ import print_function
 from collections import defaultdict
 import ConfigParser
 import os
@@ -28,6 +29,7 @@ from txcas.jinja_view_provider import Jinja2ViewProvider
 from txcas.server import ServerApp 
 from txcas.settings import load_defaults, export_settings_to_dict
 # External modules
+import mock
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
 from twisted.cred.error import UnauthorizedLogin, UnhandledCredentials
 from twisted.cred.portal import Portal, IRealm
@@ -151,7 +153,6 @@ class TicketStoreTester(object):
     """
     Test a ticket store.
     """
-    
     ticket_size = 256
     service = "http://service.example.net/theservice"
     proxied_service = "http://service.example.net/the/proxied/service"
@@ -204,7 +205,6 @@ class TicketStoreTester(object):
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         # Create ticket.
         lt = yield store.mkLoginTicket(service)
         self.assertTrue(lt.startswith('LT-'))
@@ -212,12 +212,9 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_LT_validation(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         # Create ticket.
         lt = yield store.mkLoginTicket(service)
         # Use ticket.
@@ -225,12 +222,9 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_LT_invalid_spec(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         # Create ticket.
         lt = "Not a valid ticket"
         # Use ticket.
@@ -238,12 +232,9 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_LT_invalid_ticket(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         # Create ticket.
         lt = "LT-" + ('X'*max(ticket_size-3, 1))
         # Use ticket.
@@ -251,12 +242,9 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_LT_expired_ticket(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         # A ticket that expired over time should also fail.
         lt = yield store.mkLoginTicket(service)
         self.clock.advance(store.lt_lifespan)
@@ -264,13 +252,10 @@ class TicketStoreTester(object):
 
     @defer.inlineCallbacks
     def test_ST_spec(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         tgt = yield self.makeTicketGrantingCookie()
         st = yield store.mkServiceTicket(service, tgt, False)
         yield self.assertTrue(st.startswith('ST-'))
@@ -278,17 +263,13 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def _ST_validate(self, validate_func):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create ST
         tgt = yield self.makeTicketGrantingCookie()
         st = yield store.mkServiceTicket(service, tgt, False)
-        
         result = yield validate_func(st, service)
         stored_service = result['service']
         stored_avatar_id = result['avatar_id']
@@ -304,25 +285,16 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_ST_serviceValidate(self):
-        """
-        """
         yield self._ST_validate(self.store.useServiceTicket)
         
     @defer.inlineCallbacks
     def test_ST_proxyValidate(self):
-        """
-        """
         yield self._ST_validate(self.store.useServiceOrProxyTicket)
-        
- 
         
     @defer.inlineCallbacks
     def _ST_reuse(self, validate_func):
-        """
-        """
         store = self.store
         service = self.service
-        
         # Create ST
         tgt = yield self.makeTicketGrantingCookie()
         st = yield store.mkServiceTicket(service, tgt, False)
@@ -333,23 +305,16 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_ST_reuse_serviceValidate(self):
-        """
-        """
         yield self._ST_reuse(self.store.useServiceTicket)
         
     @defer.inlineCallbacks
     def test_ST_reuse_proxyValidate(self):
-        """
-        """
         yield self._ST_reuse(self.store.useServiceOrProxyTicket)
 
     @defer.inlineCallbacks
     def _ST_expire(self, validate_func):
-        """
-        """
         store = self.store
         service = self.service
-        
         tgt = yield self.makeTicketGrantingCookie()
         st = yield store.mkServiceTicket(service, tgt, False)
         self.clock.advance(store.st_lifespan)
@@ -357,23 +322,16 @@ class TicketStoreTester(object):
 
     @defer.inlineCallbacks
     def test_ST_expire_serviceValidate(self):
-        """
-        """
         yield self._ST_expire(self.store.useServiceTicket)
         
     @defer.inlineCallbacks
     def test_ST_expire_proxyValidate(self):
-        """
-        """
         yield self._ST_expire(self.store.useServiceOrProxyTicket)
         
     @defer.inlineCallbacks
     def _ST_bad_service(self, validate_func):
-        """
-        """
         store = self.store
         service = self.service
-        
         tgt = yield self.makeTicketGrantingCookie()
         st = yield store.mkServiceTicket(service, tgt, False)
         bad_service = service + '/badservice'
@@ -389,13 +347,10 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_spec(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -404,13 +359,10 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_serviceValidate(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -418,13 +370,10 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_proxyValidate(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -453,23 +402,17 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_bad_spec(self):
-        """
-        """
         store = self.store
         service = self.service
-        
         pt = 'XY-badticket'
         yield self.assertFailure(store.useServiceOrProxyTicket(pt, service), txcas.exceptions.InvalidTicket)
         
     @defer.inlineCallbacks
     def test_PT_reuse(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -478,24 +421,18 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_invalid(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         pt = 'PT-' + 'x' * (max(1, ticket_size-3))
         yield self.assertFailure(store.useServiceOrProxyTicket(pt, service), txcas.exceptions.InvalidTicket)
         
     @defer.inlineCallbacks
     def test_PT_expire(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -504,13 +441,10 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_bad_service(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -522,9 +456,7 @@ class TicketStoreTester(object):
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
-
         yield self.assertTrue(pgt.startswith('PGT-'))
         yield self.assertEqual(len(pgt), ticket_size)
         
@@ -532,9 +464,7 @@ class TicketStoreTester(object):
     def test_PGT_expire(self):
         store = self.store
         service = self.service
-
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
-
         # Should not be able to use PGT after it has expired.
         self.clock.advance(store.pgt_lifespan)
         yield self.assertFailure(store.mkProxyTicket(service, pgt), txcas.exceptions.InvalidTicket)
@@ -544,7 +474,6 @@ class TicketStoreTester(object):
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-
         tgt = yield self.makeTicketGrantingCookie()
         yield self.assertTrue(tgt.startswith('TGC-'))
         yield self.assertEqual(len(tgt), ticket_size)
@@ -554,63 +483,63 @@ class TicketStoreTester(object):
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-
         tgt = yield self.makeTicketGrantingCookie()
         yield self.assertTrue(tgt.startswith('TGC-'))
         yield self.assertEqual(len(tgt), ticket_size)
-
         # Should not be able to use TGT after it has expired.
         self.clock.advance(store.tgt_lifespan)
         yield self.assertFailure(store.mkServiceTicket(service, tgt, False), txcas.exceptions.InvalidTicket)
 
 
 class InMemoryTicketStoreTest(TicketStoreTester, TestCase):
-    """
-    """
-        
+
     def getStore(self, clock):
         store = InMemoryTicketStore(reactor=clock, verify_cert=False)
         return store
     
 class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
-    """
-    """
-    def __init__(self, *args, **kwds):
-        super(CouchDBTicketStoreTest, self).__init__(*args, **kwds)
+    count_host = 'couch.example.org'
+    couch_port = 80
+    couch_db = 'cas_tickets'
+    couch_user = 'couch_user'
+    couch_passwd = 's3kr3t'
+    use_https = False
+    verify_cert = False
 
-        # Should these tests be run?
-        defaults = {'TESTS': {'couchdb_ticket_store': 0}}
-        scp = load_config(defaults=defaults)
-        couchdb_ticket_store = scp.getboolean('TESTS', 'couchdb_ticket_store')
-        if not couchdb_ticket_store:
-            self.__class__.skip = "Not configured to run CouchDB ticket store tests."
-            return
-        try:
-            if scp.has_section('CouchDB'):
-                self.couch_host = scp.get('CouchDB', 'host')
-                self.couch_port = scp.getint('CouchDB', 'port')
-                self.couch_db = scp.get('CouchDB', 'db')
-                self.couch_user = scp.get('CouchDB', 'user')
-                self.couch_passwd = scp.get('CouchDB', 'passwd')
-                self.use_https = scp.getboolean('CouchDB', 'https')
-                self.verify_cert = scp.getboolean('CouchDB', 'verify_cert')
-        except ConfigParser.Error as ex:
-            self.skip = "Could not read CouchDB settings: %s" % str(ex)
-            return
-        
-        # No way to run the real-time tests.
-        methods = [
-            'test_LT_expired_ticket',
-            'test_PGT_expire',
-            'test_PT_expire',
-            'test_ST_expire_proxyValidate',
-            'test_ST_expire_serviceValidate',
-            'test_TGT_expire',
-        ]
-        for method_name in methods:
-            fn = getattr(self.__class__, method_name)
-            fn.__func__.skip = "Only real-time expirations work with this ticket store."
-        
+    def setUp(self):
+        super(CouchDBTicketStoreTest, self).setUp()
+        if self.use_https:
+            scheme = 'https'
+        else:
+            scheme = 'http'
+        url = 
+            '''{scheme}://:{host}:{port}/{db}/_design/views/_view/get_by_expires'''.format(
+                scheme=scheme,
+                host=self.couch_host,
+                port=self.couch_port,
+                db=self.couch_db)
+        self.expired_url = url.encode('utf-8')
+        url = '''{scheme}://{host}:{port}/{db}'''.format(
+                scheme=self.scheme,
+                host=self.couch_host,
+                port=self.couch_port,
+                db=self.couch_db)
+        self.make_ticket_url = url.encode('utf-8')
+        url = '''{scheme}://{host}:{port}/{db}/_design/views/_view/get_ticket'''.format(
+            scheme=self.scheme,
+            host=self.couch_host,
+            port=self.couch_port,
+            db=self.couch_db)
+        self.fetch_ticket_url = url.encode('utf-8')
+        del url
+        patcher = mock.patch("txcas.couchdb_ticket_store.http")
+        self.http = patcher.start()
+        self.addCleanup(patcher.stop)
+        httpClientFactory = mock.Mock()
+        self.http.createNonVerifyingHTTPClient = httpClientFactory
+        self.http.createVerifyingHTTPClient = httpClientFactory
+        self.httpClientFactory = httpClientFactory
+
     def getStore(self, clock):
         store = CouchDBTicketStore(
                     self.couch_host, 
@@ -624,8 +553,6 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
         return store
 
 class Jinja2ViewProviderTest(TestCase):
-    """
-    """
     view_types = [VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, 
                 VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, 
                 VIEW_NOT_FOUND,]

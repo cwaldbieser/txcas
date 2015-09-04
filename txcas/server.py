@@ -1,6 +1,6 @@
 
-
 #Standard library
+from __future__ import print_function
 import cgi
 import string
 import sys
@@ -8,7 +8,6 @@ from textwrap import dedent
 from urllib import urlencode
 import urlparse
 from xml.sax.saxutils import escape as xml_escape
-
 #Application modules
 from txcas.constants import VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, \
                         VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, VIEW_NOT_FOUND
@@ -16,28 +15,23 @@ from txcas.exceptions import CASError, InvalidTicket, InvalidService, \
                         CookieAuthFailed, NotSSOService, NotHTTPSError, \
                         InvalidProxyCallback, ViewNotImplementedError, \
                         BadRequestError, InvalidTicketSpec
-import txcas.http
+from txcas.http import (
+    createNonVerifyingHTTPClient, createVerifyingHTTPClient)
 from txcas.interface import ICASUser, ITicketStore, ICASAuthWhen
 from txcas.utils import http_status_filter
-
 #External modules
 from klein import Klein
-
 import treq
-
 from twisted.cred.portal import Portal, IRealm
 from twisted.cred.credentials import UsernamePassword, IUsernamePassword
 from twisted.cred.error import Unauthorized, UnauthorizedLogin, \
                             UnhandledCredentials
-from twisted.internet import defer, reactor
+from twisted.internet import defer
 from twisted.python import log
 import twisted.web.http
 from twisted.web.static import File
 import werkzeug.exceptions
 from zope.interface import implements
-
-
-#=======================================================================
 
 def redirectJSHack(self, url):
     """
@@ -66,7 +60,6 @@ def redirect303(self, url):
     """
     self.setResponseCode(303)
     self.setHeader(b"location", url)
-    
     
 twisted.web.http.Request.redirectJSHack = redirectJSHack
 twisted.web.http.Request.redirect303 = redirect303
@@ -129,8 +122,6 @@ def log_cas_event(label, attribs):
     log.msg('''[INFO][CAS] label="%s" %s''' % (label, tail))
 
 def log_http_event(request, redact_args=None):
-    """
-    """
     args = dict(request.args)
     if redact_args is not None:
         for arg in redact_args:
@@ -144,8 +135,6 @@ def log_http_event(request, redact_args=None):
     log.msg(msg)
 
 def log_ticket_expiration(ticket, data, explicit):
-    """
-    """
     if not explicit:
         attribs = [('ticket', ticket)]
         for key, label in [('service', 'service'), ('avatar_id', 'username'), 
@@ -201,20 +190,13 @@ def extract_avatar(result):
     return aspect
 
 
-
-#=======================================================================
-# The server app
-#=======================================================================
-
 class ServerApp(object):
-
     app = Klein()
     cookie_name = 'tgc'
 
-    
     def __init__(self, ticket_store, realm, checkers, validService=None,
                  requireSSL=True, page_views=None, validate_pgturl=True,
-                 static=None):
+                 static=None, reactor=None):
         """
         Initialize an instance of the CAS server.
 
@@ -251,9 +233,11 @@ class ServerApp(object):
         assert ticket_store is not None, "No Ticket Store was configured."
         assert realm is not None, "No Realm was configured."
         assert len(checkers) > 0, "No Credential Checkers were configured."
+        if reactor is None:
+            from twisted.internet import reactor
+        self.reactor = reactor
         for n, checker in enumerate(checkers):
             assert checker is not None, "Credential Checker #%d was not configured." % n
-        
         self.cookies = {}
         self.ticket_store = ticket_store
         self.cred_requestor_portal = Portal(realm)
@@ -273,7 +257,6 @@ class ServerApp(object):
         self.validService = validService or (lambda x: True)
         self.validate_pgturl = validate_pgturl
         self._static = static
-
         default_page_views = {
                 VIEW_LOGIN: self._renderLogin,
                 VIEW_LOGIN_SUCCESS: self._renderLoginSuccess,
@@ -291,9 +274,7 @@ class ServerApp(object):
             page_views = temp
             del temp
         self.page_views = page_views
-        
         self.ticket_store.register_ticket_expiration_callback(log_ticket_expiration)
-
         self.show_login_page = self._isLoginPageRequired()
 
     def _isLoginPageRequired(self):
@@ -325,10 +306,10 @@ class ServerApp(object):
         return err
 
     def _get_page_view(self, symbol, *args):
+
         def eb(err, symbol, *args):
             err.trap(ViewNotImplementedError) 
             log.err(err)            
-
             return defer.maybeDeferred(self._default_page_views[symbol], *args)
 
         d = defer.maybeDeferred(self.page_views[symbol], *args)
@@ -449,6 +430,7 @@ class ServerApp(object):
     def _presentLogin(self, request, failed=False):
         # If the login is presented, the TGC should be removed and the TGT
         # should be expired.
+
         def expireTGT():
             tgc = request.getCookie(self.cookie_name)
             if tgc:
@@ -459,6 +441,7 @@ class ServerApp(object):
                 d = self.ticket_store.expireTGT(tgc)
                 return d
             return None
+
         service = get_single_param_or_default(request, 'service', "")
         gateway = get_single_param_or_default(request, 'gateway', "")
         if gateway != "" and service != "":
@@ -714,7 +697,6 @@ class ServerApp(object):
                 d = self._presentLogin(request, failed=True)
                 return d
             else:
-                #TODO: How to respond if trust auth fails and there is no login auth?
                 return err
 
         # check credentials
@@ -739,6 +721,7 @@ class ServerApp(object):
     def logout_GET(self, request):
         log_http_event(request)
         service = get_single_param_or_default(request, 'service', "")
+
         def _validService(_, service):
             def eb(err):
                 err.trap(InvalidService)
@@ -752,11 +735,13 @@ class ServerApp(object):
             request.addCookie(
                 self.cookie_name, '', expires='Thu, 01 Jan 1970 00:00:00 GMT')
             #Expire the ticket.
+
             def log_ticket_expired(result, tgc, request):
                 log_cas_event("Explicitly logged out of SSO", [
                     ('client_ip', request.getClientIP()),
                     ('TGC', tgc)])
                 return result
+
             d = self.ticket_store.expireTGT(tgc)
             d.addCallback(log_ticket_expired, tgc, request)
         else:
@@ -775,7 +760,6 @@ class ServerApp(object):
         d.addErrback(self._page_view_errback, VIEW_ERROR_5XX, request)
         return d
 
-
     @app.route('/validate', methods=['GET'])
     def validate_GET(self, request):
         """
@@ -788,7 +772,6 @@ class ServerApp(object):
         if service == "" or ticket == "":
             request.setResponseCode(403)
             return 'no\n\n'
-
         if renew != "":
             require_pc = True
         else:
@@ -852,7 +835,6 @@ class ServerApp(object):
         service = get_single_param_or_default(request, 'service', None)
         pgturl = get_single_param_or_default(request, 'pgtUrl', "")
         renew = get_single_param_or_default(request, 'renew', "")
-        
         if service is None or ticket is None:
             request.setResponseCode(400)
             return dedent("""\
@@ -862,12 +844,10 @@ class ServerApp(object):
                    </cas:authenticationFailure>
                 </cas:serviceResponse>
                 """)
-        
         if renew != "":
             require_pc = True
         else:
             require_pc = False
-       
         if proxyValidate: 
             d = self.ticket_store.useServiceOrProxyTicket(ticket, service, require_pc)
         else:
@@ -887,7 +867,6 @@ class ServerApp(object):
 
         def renderSuccess(results, ticket, request):
             avatar = results['avatar']
-            
             attribs = [
                 ('client_ip', request.getClientIP()),
                 ('user', avatar.username),
@@ -900,10 +879,8 @@ class ServerApp(object):
             if 'proxy_chain' in results:
                 attribs.append(("proxy_chain", ', '.join(results['proxy_chain'])))
             log_cas_event("Validated ticket.", attribs)
-            
             iou = results.get('iou', None)
             proxy_chain = results.get('proxy_chain', None)
-            
             doc_begin = dedent("""\
                 <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
                     <cas:authenticationSuccess>
@@ -983,7 +960,6 @@ class ServerApp(object):
         # PGT is created and we want to record its origin ST/PT.
         avatar_id = data['avatar_id']
         tgt = data['tgt']
-
         # If the validated ticket was a PT, extract the proxy_chain that was used
         # to create *its* parent PGT so it can be added to the proxy chain for
         # the requested PGT.
@@ -997,7 +973,6 @@ class ServerApp(object):
             proxy_chain = data['proxy_chain']
         else:
             proxy_chain = None
-
         if pgturl == "":
             return data
         
@@ -1005,11 +980,10 @@ class ServerApp(object):
             return self.ticket_store.mkProxyGrantingTicket(
                 service, ticket, tgt, pgturl, proxy_chain=proxy_chain)
         
-        def _sendTicketAndIou(pgt_info, pgturl, reqlib):
-            """
-            """
+        def _sendTicketAndIou(pgt_info, pgturl, httpClientFactory):
             pgt = pgt_info['pgt']
             iou = pgt_info['iou']
+
             def iou_cb(resp_text, pgtiou):
                 """
                 Return the iou parameter.
@@ -1021,9 +995,10 @@ class ServerApp(object):
                 ('pgturl', pgturl),
                 ('pgtIou', iou),
                 ('pgtId', pgt),])
-            d = reqlib.get(pgturl, params=q, timeout=30)
+            httpClient = httpClientFactory(self.reactor)
+            d = httpClient.get(pgturl, params=q, timeout=30)
             d.addCallback(http_status_filter, [(200, 200)], InvalidProxyCallback)
-            d.addCallback(reqlib.content)
+            d.addCallback(treq.content)
             d.addCallback(iou_cb, iou)
             return d
             
@@ -1031,22 +1006,20 @@ class ServerApp(object):
             data['iou'] = iou
             return data
         
-        reqlib = treq
         if self.validate_pgturl:
+            httpClientFactory = createVerifyingHTTPClient
             p = urlparse.urlparse(pgturl)
             if p.scheme.lower() != "https":
                 raise NotHTTPSError("The pgtUrl '%s' is not HTTPS.")
         else:
-            reqlib = txcas.http
-            
-        d = reqlib.get(pgturl)
+            httpClientFactory = createNonVerifyingHTTPClient
+        httpClient = httpClientFactory(self.reactor)
+        d = httpClient.get(pgturl)
         d.addCallback(http_status_filter, [(200, 200)], InvalidProxyCallback)
-        d.addCallback(reqlib.content)
-        
+        d.addCallback(treq.content)
         d.addCallback(_mkPGT)
-        d.addCallback(_sendTicketAndIou, pgturl, reqlib)
+        d.addCallback(_sendTicketAndIou, pgturl, httpClientFactory)
         d.addCallback(_package_result, data)
-        
         return d
 
     @app.route('/proxy', methods=['GET'])
@@ -1066,8 +1039,8 @@ class ServerApp(object):
                     </cas:proxyFailure>
                 </cas:serviceResponse>
                 """)
-        
         # Validate the PGT and get the PT
+
         def successResult(ticket, targetService, pgt, request):
             log_cas_event("Issued proxy ticket", [
                 ('client_ip', request.getClientIP()),
@@ -1129,16 +1102,8 @@ class ServerApp(object):
                     request.getClientIP(), request.uri))
         return self._get_page_view(VIEW_NOT_FOUND, request)
 
-
     @app.handle_errors(BadRequestError)
     def handle_bad_request(self, request, failure):
         log.msg('[ERROR] type="bad_request" client_ip="%s" uri="%s"' % (
                     request.getClientIP(), request.uri))
         return self._get_page_view(VIEW_ERROR_5XX, failure, request)
-        
-            
-            
-            
-
-
-
