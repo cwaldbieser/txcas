@@ -575,12 +575,9 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
         self.addCleanup(patcher.stop)
         super(CouchDBTicketStoreTest, self).setUp()
 
-    def deterministic_now(self):
-        return datetime.datetime.fromtimestamp(self.clock.seconds())
-
     def test_LT_expired_ticket(self):
         self.http_body_generator = iter([
-            "This response body doesn't matter.",
+            "this response body doesn't matter.",
             json.dumps({
                 'rows': [
                     {
@@ -589,14 +586,35 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
                             '_id': 'fakeid',
                             '_rev': 1,
                             'expires': self.deterministic_now().strftime(
-                                "%Y-%m-%dT%H:%M:%S")
+                                "%y-%m-%dt%h:%m:%s")
                         },
                     }
                 ]}),
-            "This response body doesn't matter.",
+            "this response body doesn't matter.",
             ])
-        self.store.poll_expired = 0
         return super(CouchDBTicketStoreTest, self).test_LT_expired_ticket()
+
+    def test_LT_invalid_ticket(self):
+        self.http_body_generator = iter([
+            json.dumps({'rows': [],}),
+            ])
+        return super(CouchDBTicketStoreTest, self).test_LT_invalid_ticket()
+
+    def getStore(self, clock):
+        store = CouchDBTicketStore(
+                    self.couch_host, 
+                    self.couch_port, 
+                    self.couch_db,
+                    self.couch_user, 
+                    self.couch_passwd, 
+                    self.use_https,
+                    reactor=clock, 
+                    verify_cert=self.verify_cert)
+        store.poll_expired = 0
+        return store
+
+    def deterministic_now(self):
+        return datetime.datetime.fromtimestamp(self.clock.seconds())
         
     def get_http_body(self):
         try:
@@ -630,18 +648,6 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
         response.code = 200
         response.deliverBody = deliverFakeBodyFactory(self.get_http_body())
         return defer.succeed(response)
-
-    def getStore(self, clock):
-        store = CouchDBTicketStore(
-                    self.couch_host, 
-                    self.couch_port, 
-                    self.couch_db,
-                    self.couch_user, 
-                    self.couch_passwd, 
-                    self.use_https,
-                    reactor=clock, 
-                    verify_cert=self.verify_cert)
-        return store
 
 class Jinja2ViewProviderTest(TestCase):
     view_types = [VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, 
