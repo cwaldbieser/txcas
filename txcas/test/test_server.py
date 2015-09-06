@@ -586,7 +586,7 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
                             '_id': 'fakeid',
                             '_rev': 1,
                             'expires': self.deterministic_now().strftime(
-                                "%y-%m-%dt%h:%m:%s")
+                                "%Y-%m-%dT%H:%M:%S")
                         },
                     }
                 ]}),
@@ -599,6 +599,27 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
             json.dumps({'rows': [],}),
             ])
         return super(CouchDBTicketStoreTest, self).test_LT_invalid_ticket()
+
+    def test_LT_validation(self):
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.lt_lifespan)
+        self.http_body_generator = iter([
+            "this response body doesn't matter.",
+            json.dumps({
+                'rows': [
+                    {
+                        'value': {
+                            'service': self.service,
+                            '_id': 'fakeid',
+                            '_rev': 1,
+                            'expires': later.strftime(
+                                "%Y-%m-%dT%H:%M:%S")
+                        },
+                    }
+                ]}),
+            "this response body doesn't matter.",
+            ])
+        return super(CouchDBTicketStoreTest, self).test_LT_validation()
 
     def getStore(self, clock):
         store = CouchDBTicketStore(
