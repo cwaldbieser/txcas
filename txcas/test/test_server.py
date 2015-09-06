@@ -3,6 +3,9 @@
 from __future__ import print_function
 from collections import defaultdict
 import ConfigParser
+import datetime
+import itertools
+import json
 import os
 import os.path
 import re
@@ -36,9 +39,11 @@ from twisted.cred.portal import Portal, IRealm
 from twisted.internet import defer, task, reactor, utils, protocol
 from twisted.internet.address import IPv4Address
 from twisted.internet.interfaces import ISSLTransport
+#from twisted.internet.protocol import connectionDone
 from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath
 from twisted.trial.unittest import TestCase
+from twisted.web.client import ResponseDone
 from twisted.web import microdom
 from twisted.web import server
 from twisted.web.http_headers import Headers
@@ -248,7 +253,10 @@ class TicketStoreTester(object):
         # A ticket that expired over time should also fail.
         lt = yield store.mkLoginTicket(service)
         self.clock.advance(store.lt_lifespan)
-        yield self.assertFailure(store.useLoginTicket(lt, service), txcas.exceptions.InvalidTicket)
+        print("Asserting failure ...", file=sys.stderr)
+        yield self.assertFailure(
+            store.useLoginTicket(lt, service), 
+            txcas.exceptions.InvalidTicket)
 
     @defer.inlineCallbacks
     def test_ST_spec(self):
@@ -496,9 +504,19 @@ class InMemoryTicketStoreTest(TicketStoreTester, TestCase):
     def getStore(self, clock):
         store = InMemoryTicketStore(reactor=clock, verify_cert=False)
         return store
+   
+
+def deliverFakeBodyFactory(data):
     
+    def deliverFakeBody(proto):
+        proto.dataReceived(data)
+        proto.connectionLost(Failure(ResponseDone()))
+
+    return deliverFakeBody
+
+ 
 class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
-    count_host = 'couch.example.org'
+    couch_host = 'couch.example.org'
     couch_port = 80
     couch_db = 'cas_tickets'
     couch_user = 'couch_user'
@@ -507,38 +525,111 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
     verify_cert = False
 
     def setUp(self):
-        super(CouchDBTicketStoreTest, self).setUp()
+        self.http_body_generator = itertools.repeat("")
         if self.use_https:
             scheme = 'https'
         else:
             scheme = 'http'
-        url = 
-            '''{scheme}://:{host}:{port}/{db}/_design/views/_view/get_by_expires'''.format(
+        url = '''{scheme}://:{host}:{port}/{db}/_design/views/_view/get_by_expires'''.format(
                 scheme=scheme,
                 host=self.couch_host,
                 port=self.couch_port,
                 db=self.couch_db)
         self.expired_url = url.encode('utf-8')
         url = '''{scheme}://{host}:{port}/{db}'''.format(
-                scheme=self.scheme,
+                scheme=scheme,
                 host=self.couch_host,
                 port=self.couch_port,
                 db=self.couch_db)
         self.make_ticket_url = url.encode('utf-8')
         url = '''{scheme}://{host}:{port}/{db}/_design/views/_view/get_ticket'''.format(
-            scheme=self.scheme,
+            scheme=scheme,
             host=self.couch_host,
             port=self.couch_port,
             db=self.couch_db)
         self.fetch_ticket_url = url.encode('utf-8')
+        url = '''{scheme}://{host}:{port}/{db}/'''.format(
+            scheme=scheme,
+            host=self.couch_host,
+            port=self.couch_port,
+            db=self.couch_db)
+        self.delete_ticket_url_prefix = url.encode('utf-8')
         del url
-        patcher = mock.patch("txcas.couchdb_ticket_store.http")
-        self.http = patcher.start()
+        patcher = mock.patch("txcas.couchdb_ticket_store.createNonVerifyingHTTPClient")
+        self.createNonVerifyingHTTPClient = patcher.start()
         self.addCleanup(patcher.stop)
-        httpClientFactory = mock.Mock()
-        self.http.createNonVerifyingHTTPClient = httpClientFactory
-        self.http.createVerifyingHTTPClient = httpClientFactory
-        self.httpClientFactory = httpClientFactory
+        patcher = mock.patch("txcas.couchdb_ticket_store.createVerifyingHTTPClient")
+        self.createVerifyingHTTPClient = patcher.start()
+        self.addCleanup(patcher.stop)
+        httpClient = mock.Mock()
+        self.createNonVerifyingHTTPClient.return_value = httpClient
+        self.createVerifyingHTTPClient.return_value = httpClient
+        httpClient.get.side_effect = self.http_get
+        httpClient.put.side_effect = self.http_put
+        httpClient.post.side_effect = self.http_post
+        httpClient.delete.side_effect = self.http_delete
+        patcher = mock.patch("txcas.couchdb_ticket_store.datetime")
+        self.datetime = patcher.start()
+        self.datetime.timedelta = datetime.timedelta
+        self.datetime.datetime.today = self.deterministic_now
+        self.addCleanup(patcher.stop)
+        super(CouchDBTicketStoreTest, self).setUp()
+
+    def deterministic_now(self):
+        return datetime.datetime.fromtimestamp(self.clock.seconds())
+
+    def test_LT_expired_ticket(self):
+        self.http_body_generator = iter([
+            "This response body doesn't matter.",
+            json.dumps({
+                'rows': [
+                    {
+                        'value': {
+                            'service': self.service,
+                            '_id': 'fakeid',
+                            '_rev': 1,
+                            'expires': self.deterministic_now().strftime(
+                                "%Y-%m-%dT%H:%M:%S")
+                        },
+                    }
+                ]}),
+            "This response body doesn't matter.",
+            ])
+        self.store.poll_expired = 0
+        return super(CouchDBTicketStoreTest, self).test_LT_expired_ticket()
+        
+    def get_http_body(self):
+        try:
+            value = self.http_body_generator.next()
+        except StopIteration:
+            value = "Ran out of HTTP bodies!"
+        return value
+    
+    def http_get(self, url, **kwds):
+        response = mock.Mock()
+        if url == self.expired_url:
+            response.code = 200
+        elif url == self.fetch_ticket_url:
+            response.code = 200
+        response.deliverBody = deliverFakeBodyFactory(self.get_http_body())
+        return defer.succeed(response)
+
+    def http_put(self, url, **kwds):
+        response = mock.Mock()
+        response.code = 201
+        return defer.succeed(response)
+
+    def http_post(self, url, **kwds):
+        response = mock.Mock()
+        response.code = 201
+        response.deliverBody = deliverFakeBodyFactory(self.get_http_body())
+        return defer.succeed(response)
+
+    def http_delete(self, url, **kwds):
+        response = mock.Mock()
+        response.code = 200
+        response.deliverBody = deliverFakeBodyFactory(self.get_http_body())
+        return defer.succeed(response)
 
     def getStore(self, clock):
         store = CouchDBTicketStore(

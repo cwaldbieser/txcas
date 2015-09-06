@@ -20,6 +20,7 @@ def http_status_filter(response, allowed, ex, msg=None, include_resp_text=True):
             in_range = True
             break
     if not in_range:
+
         def raise_error(body, ex):
             ex_msg = []
             if msg is not None:
@@ -31,6 +32,7 @@ def http_status_filter(response, allowed, ex, msg=None, include_resp_text=True):
                 raise ex(text)
             else:
                 raise ex()
+
         # Need to still deliver the response body or Twisted make
         # hang.
         d = treq.content(response)

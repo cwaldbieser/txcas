@@ -1,5 +1,6 @@
 
 # Standard library
+from __future__ import print_function
 import datetime
 import json
 import random
@@ -159,7 +160,12 @@ class CouchDBTicketStore(object):
             self._scheme = 'https://'
         else:
             self._scheme = 'http://'
-        reactor.callLater(self.poll_expired, self._clean_expired)
+        
+        def startExpirations_():
+            if self.poll_expired > 0:
+                reactor.callLater(self.poll_expired, self._clean_expired)
+
+        reactor.callLater(0, startExpirations_)
        
     def _getServiceValidator(self):
         service_mgr = self.service_manager
@@ -280,6 +286,7 @@ class CouchDBTicketStore(object):
                         headers=Headers({
                             'Accept': ['application/json'], 
                             'Content-Type': ['application/json']}))
+
         d.addCallback(http_status_filter, [(201,201)], CouchDBError)
         d.addCallback(treq.content)
         d.addCallback(return_ticket, ticket)
@@ -476,12 +483,13 @@ class CouchDBTicketStore(object):
         Create a login ticket.
         """
         d = self._validService(service)
+
         def cb(_):
             return self._mkTicket('LT-', {
                 'service': service,
             }, timeout=self.lt_lifespan)
-        return d.addCallback(cb)
 
+        return d.addCallback(cb)
 
     def useLoginTicket(self, ticket, service):
         """
@@ -501,6 +509,7 @@ class CouchDBTicketStore(object):
                             recorded_service, service)))
 
             return d.addCallback(cb)
+
         return self._validService(service).addCallback(doit)
 
     @defer.inlineCallbacks
