@@ -523,9 +523,11 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
     couch_passwd = 's3kr3t'
     use_https = False
     verify_cert = False
+    handleBeforeSimulatedHTTPResponse = None
     debug = False
 
     def setUp(self):
+        self.handleBeforeSimulatedHTTPResponse = lambda : None
         self.requests = []
         self.httpResponseGenerator = itertools.repeat("")
         if self.use_https:
@@ -732,6 +734,58 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
             d.addBoth(self._printRequests)
         return d
 
+    def test_PT_proxyValidate(self):
+        store = self.store
+        store.pt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createPTHTTPResponses()
+
+        def _extractTGC():
+            if len(self.requests) == 7:
+                data = self.requests[0][2]['data']
+                doc = json.loads(data)
+                tgt = doc['ticket_id']
+                data = self.requests[6][2]['data']
+                doc = json.loads(data)
+                pgt = doc['ticket_id']
+                pgturl = doc['pgturl']
+                proxy_chain = doc['proxy_chain']
+                responses.extend([
+                    # GET - Fetch PT
+                    (
+                        200,
+                        json.dumps({
+                            'rows': [
+                                {
+                                    'value': {
+                                        'service': self.service,
+                                        '_id': 'pt-fakeid',
+                                        '_rev': '1',
+                                        'expires': later.strftime(
+                                            "%Y-%m-%dT%H:%M:%S"),
+                                        'avatar_id': self.avatar_id,
+                                        'tgt': tgt,
+                                        'pgt': pgt,
+                                        'pgturl': pgturl,
+                                        'proxy_chain': proxy_chain,
+                                        'primary_credentials': True,
+                                    },
+                                }
+                            ]
+                        })
+                    ),
+                    # DELETE - delete PT
+                    (200, json.dumps({'msg': 'PT deleted.'})),
+                ])
+
+        self.handleBeforeSimulatedHTTPResponse = _extractTGC
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_proxyValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
     def _createPTHTTPResponses(self):
         responses = self._createPGTHTTPResponses()
         later = self.deterministic_now() + datetime.timedelta(
@@ -925,9 +979,10 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
         except StopIteration:
             value = (500, "Ran out of HTTP responses!")
         return value
-    
+
     def simulateHTTPRequest(self, method, url, **kwds):
         self.requests.append((method, url, kwds))
+        self.handleBeforeSimulatedHTTPResponse()
         response = mock.Mock()
         code, body = self.getNextHTTPResponse()
         response.code = code
