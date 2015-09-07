@@ -786,6 +786,68 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
             d.addBoth(self._printRequests)
         return d
 
+    def test_PT_reuse(self):
+        store = self.store
+        store.pt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createPTHTTPResponses()
+
+        def _extractTGC():
+            if len(self.requests) == 7:
+                data = self.requests[0][2]['data']
+                doc = json.loads(data)
+                tgt = doc['ticket_id']
+                data = self.requests[6][2]['data']
+                doc = json.loads(data)
+                pgt = doc['ticket_id']
+                pgturl = doc['pgturl']
+                proxy_chain = doc['proxy_chain']
+                responses.extend([
+                    # GET - Fetch PT
+                    (
+                        200,
+                        json.dumps({
+                            'rows': [
+                                {
+                                    'value': {
+                                        'service': self.service,
+                                        '_id': 'pt-fakeid',
+                                        '_rev': '1',
+                                        'expires': later.strftime(
+                                            "%Y-%m-%dT%H:%M:%S"),
+                                        'avatar_id': self.avatar_id,
+                                        'tgt': tgt,
+                                        'pgt': pgt,
+                                        'pgturl': pgturl,
+                                        'proxy_chain': proxy_chain,
+                                        'primary_credentials': True,
+                                    },
+                                }
+                            ]
+                        })
+                    ),
+                    # DELETE - delete PT
+                    (200, json.dumps({'msg': 'PT deleted.'})),
+                    # GET - Fetch PT
+                    (200, json.dumps({'rows': []})),
+                ])
+
+        def _assertProxyTicketReused(result):
+            requests = self.requests
+            pt0 = requests[-3][2]['params']['key']
+            pt1 = requests[-1][2]['params']['key']
+            self.assertEqual(pt0, pt1)
+            return result
+            
+        self.handleBeforeSimulatedHTTPResponse = _extractTGC
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_reuse()
+        d.addCallback(_assertProxyTicketReused)
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
     def _createPTHTTPResponses(self):
         responses = self._createPGTHTTPResponses()
         later = self.deterministic_now() + datetime.timedelta(
