@@ -660,6 +660,61 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
         return d
 
     def test_PT_bad_service(self):
+        store = self.store
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createPTHTTPResponses()
+        responses.extend([
+            # GET - Fetch PT
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'pt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # DELETE - Remove PT
+            (200, json.dumps({'msg': "this response body must be JSON."})),
+        ])
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_bad_service()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+    
+    def test_PT_expire(self):
+        store = self.store
+        store.pt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        store.check_expired_interval = store.pt_lifespan - 1
+        responses = self._createPTHTTPResponses()
+        responses.extend([
+            # GET - Expiration checker should fire here.
+            (200, json.dumps({'rows': []})),
+            # GET - Fetch PT
+            (
+                200,
+                json.dumps({'rows': []})
+            ),
+        ])
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_expire()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def _createPTHTTPResponses(self):
         responses = self._createPGTHTTPResponses()
         later = self.deterministic_now() + datetime.timedelta(
             2*self.store.tgt_lifespan)
@@ -707,32 +762,9 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
             ),
             # PUT - add service to TGC
             (201, json.dumps({'msg': "this response body must be JSON."})),
-            # GET - Fetch PT
-            (
-                200,
-                json.dumps({
-                    'rows': [
-                        {
-                            'value': {
-                                'service': self.service,
-                                '_id': 'pt-fakeid',
-                                '_rev': '1',
-                                'expires': later.strftime(
-                                    "%Y-%m-%dT%H:%M:%S"),
-                                'avatar_id': self.avatar_id,
-                            },
-                        }
-                    ]
-                })
-            ),
-            # DELETE - Remove PT
-            (200, json.dumps({'msg': "this response body must be JSON."})),
         ])
-        self.httpResponseGenerator = iter(responses)
-        d = super(CouchDBTicketStoreTest, self).test_PT_bad_service()
-        if self.debug:
-            d.addBoth(self._printRequests)
-        return d
+        return responses
+    
 
     def _createPGTHTTPResponses(self):
         store = self.store
