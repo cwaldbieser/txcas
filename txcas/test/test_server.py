@@ -8,6 +8,7 @@ import itertools
 import json
 import os
 import os.path
+import pprint
 import re
 from StringIO import StringIO
 import sys
@@ -253,7 +254,6 @@ class TicketStoreTester(object):
         # A ticket that expired over time should also fail.
         lt = yield store.mkLoginTicket(service)
         self.clock.advance(store.lt_lifespan)
-        print("Asserting failure ...", file=sys.stderr)
         yield self.assertFailure(
             store.useLoginTicket(lt, service), 
             txcas.exceptions.InvalidTicket)
@@ -474,7 +474,7 @@ class TicketStoreTester(object):
         service = self.service
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         # Should not be able to use PGT after it has expired.
-        self.clock.advance(store.pgt_lifespan)
+        self.clock.advance(store.pgt_lifespan*2)
         yield self.assertFailure(store.mkProxyTicket(service, pgt), txcas.exceptions.InvalidTicket)
         
     @defer.inlineCallbacks
@@ -523,38 +523,15 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
     couch_passwd = 's3kr3t'
     use_https = False
     verify_cert = False
+    debug = False
 
     def setUp(self):
-        self.http_body_generator = itertools.repeat("")
+        self.requests = []
+        self.httpResponseGenerator = itertools.repeat("")
         if self.use_https:
             scheme = 'https'
         else:
             scheme = 'http'
-        url = '''{scheme}://:{host}:{port}/{db}/_design/views/_view/get_by_expires'''.format(
-                scheme=scheme,
-                host=self.couch_host,
-                port=self.couch_port,
-                db=self.couch_db)
-        self.expired_url = url.encode('utf-8')
-        url = '''{scheme}://{host}:{port}/{db}'''.format(
-                scheme=scheme,
-                host=self.couch_host,
-                port=self.couch_port,
-                db=self.couch_db)
-        self.make_ticket_url = url.encode('utf-8')
-        url = '''{scheme}://{host}:{port}/{db}/_design/views/_view/get_ticket'''.format(
-            scheme=scheme,
-            host=self.couch_host,
-            port=self.couch_port,
-            db=self.couch_db)
-        self.fetch_ticket_url = url.encode('utf-8')
-        url = '''{scheme}://{host}:{port}/{db}/'''.format(
-            scheme=scheme,
-            host=self.couch_host,
-            port=self.couch_port,
-            db=self.couch_db)
-        self.delete_ticket_url_prefix = url.encode('utf-8')
-        del url
         patcher = mock.patch("txcas.couchdb_ticket_store.createNonVerifyingHTTPClient")
         self.createNonVerifyingHTTPClient = patcher.start()
         self.addCleanup(patcher.stop)
@@ -564,10 +541,10 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
         httpClient = mock.Mock()
         self.createNonVerifyingHTTPClient.return_value = httpClient
         self.createVerifyingHTTPClient.return_value = httpClient
-        httpClient.get.side_effect = self.http_get
-        httpClient.put.side_effect = self.http_put
-        httpClient.post.side_effect = self.http_post
-        httpClient.delete.side_effect = self.http_delete
+        httpClient.get.side_effect = self.simulateHTTPGet
+        httpClient.put.side_effect = self.simulateHTTPPut
+        httpClient.post.side_effect = self.simulateHTTPPost
+        httpClient.delete.side_effect = self.simulateHTTPDelete
         patcher = mock.patch("txcas.couchdb_ticket_store.datetime")
         self.datetime = patcher.start()
         self.datetime.timedelta = datetime.timedelta
@@ -576,50 +553,221 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
         super(CouchDBTicketStoreTest, self).setUp()
 
     def test_LT_expired_ticket(self):
-        self.http_body_generator = iter([
-            "this response body doesn't matter.",
-            json.dumps({
-                'rows': [
-                    {
-                        'value': {
-                            'service': self.service,
-                            '_id': 'fakeid',
-                            '_rev': 1,
-                            'expires': self.deterministic_now().strftime(
-                                "%Y-%m-%dT%H:%M:%S")
-                        },
-                    }
-                ]}),
-            "this response body doesn't matter.",
-            ])
+        store = self.store
+        store.check_expired_interval = store.pgt_lifespan - 1
+        self.httpResponseGenerator = iter([
+            (201, "this response body doesn't matter."),
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'fakeid',
+                                '_rev': 1,
+                                'expires': self.deterministic_now().strftime(
+                                    "%Y-%m-%dT%H:%M:%S")
+                            },
+                        }
+                    ]}
+                )
+            ),
+            (201, "this response body doesn't matter."),
+        ])
         return super(CouchDBTicketStoreTest, self).test_LT_expired_ticket()
 
+    def test_LT_spec(self):
+        self.httpResponseGenerator = iter([
+            (201, "this response body doesn't matter."),
+        ])
+        return super(CouchDBTicketStoreTest, self).test_LT_spec()
+
     def test_LT_invalid_ticket(self):
-        self.http_body_generator = iter([
-            json.dumps({'rows': [],}),
-            ])
+        self.httpResponseGenerator = iter([
+            (200, json.dumps({'rows': [],})),
+        ])
         return super(CouchDBTicketStoreTest, self).test_LT_invalid_ticket()
 
     def test_LT_validation(self):
         later = self.deterministic_now() + datetime.timedelta(
             2*self.store.lt_lifespan)
-        self.http_body_generator = iter([
-            "this response body doesn't matter.",
-            json.dumps({
-                'rows': [
-                    {
-                        'value': {
-                            'service': self.service,
-                            '_id': 'fakeid',
-                            '_rev': 1,
-                            'expires': later.strftime(
-                                "%Y-%m-%dT%H:%M:%S")
-                        },
-                    }
-                ]}),
-            "this response body doesn't matter.",
-            ])
-        return super(CouchDBTicketStoreTest, self).test_LT_validation()
+        self.httpResponseGenerator = iter([
+            # POST - Create LT
+            (201, "this response body doesn't matter."),
+            # GET - Fetch LT
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'fakeid',
+                                '_rev': 1,
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S")
+                            },
+                        }
+                    ]
+                })
+            ),
+            # DELETE - Remove LT
+            (200, "this response body doesn't matter."),
+        ])
+        d = super(CouchDBTicketStoreTest, self).test_LT_validation()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_PGT_expire(self):
+        store = self.store
+        store.pgt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        store.check_expired_interval = store.pgt_lifespan - 1
+        responses = self._createPGTHTTPResponses()
+        responses.extend([
+            # GET - Expiration checker should fire here.
+            (200, json.dumps({'rows': []})),
+            # GET - Fetch PGT - will have expired.
+            (200, json.dumps({'rows': []})),
+        ])
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PGT_expire()
+        
+        def assertExpiredTicketCleanerCalled(result):
+            requests = self.requests
+            self.assertEqual(len(requests), len(responses))
+            method, url, kwds = requests[-2]
+            self.assertEqual(method, 'GET')
+            self.assertTrue(url.endswith('/_design/views/_view/get_by_expires'))
+            return result
+
+        d.addCallback(assertExpiredTicketCleanerCalled)
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_PGT_spec(self):
+        responses = self._createPGTHTTPResponses()
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PGT_spec()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def _createPGTHTTPResponses(self):
+        store = self.store
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = [
+            # POST - Create TGC
+            (201, "this response body doesn't matter."),
+            # Create ST
+            # 1)  GET - Fetch TGC
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'tgt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # 2) POST - Create ST
+            (
+                201,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                                'tgt': 'tgt-fakeid',
+                                'primary_credentials': True,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # 3) GET - Fetch TGT
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'tgt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # 4) PUT - Modify TGC to have reference to ST
+            (201, json.dumps({'msg': "this response body must be JSON."})),
+            # Make the PGT
+            # 1) GET - Fetch a the TGC
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'tgt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # 2) POST - Create the PGT
+            (201, "Response from creating a PGT."),
+            # *3) GET - Fetch a the TGC
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'tgt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # Update TGC with PGT reference.
+            (201, json.dumps({'msg': "this response body must be JSON."})),
+        ]
+        return responses
 
     def getStore(self, clock):
         store = CouchDBTicketStore(
@@ -631,44 +779,48 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
                     self.use_https,
                     reactor=clock, 
                     verify_cert=self.verify_cert)
-        store.poll_expired = 0
+        store.check_expired_interval = 0
         return store
 
     def deterministic_now(self):
         return datetime.datetime.fromtimestamp(self.clock.seconds())
         
-    def get_http_body(self):
+    def _printRequests(self, result):
+        for req in self.requests:
+            method, url, kwds = req
+            print('METHOD: {0}'.format(method), file=sys.stderr)
+            print('URL: {0}'.format(url), file=sys.stderr)
+            pprint.pprint(kwds, stream=sys.stderr)
+            print('', file=sys.stderr)
+        return result
+
+    def getNextHTTPResponse(self):
         try:
-            value = self.http_body_generator.next()
+            value = self.httpResponseGenerator.next()
         except StopIteration:
-            value = "Ran out of HTTP bodies!"
+            value = (500, "Ran out of HTTP responses!")
         return value
     
-    def http_get(self, url, **kwds):
+    def simulateHTTPRequest(self, method, url, **kwds):
+        self.requests.append((method, url, kwds))
         response = mock.Mock()
-        if url == self.expired_url:
-            response.code = 200
-        elif url == self.fetch_ticket_url:
-            response.code = 200
-        response.deliverBody = deliverFakeBodyFactory(self.get_http_body())
+        code, body = self.getNextHTTPResponse()
+        response.code = code
+        response.deliverBody = deliverFakeBodyFactory(body)
         return defer.succeed(response)
 
-    def http_put(self, url, **kwds):
-        response = mock.Mock()
-        response.code = 201
-        return defer.succeed(response)
+    def simulateHTTPGet(self, url, **kwds):
+        return self.simulateHTTPRequest('GET', url, **kwds)
 
-    def http_post(self, url, **kwds):
-        response = mock.Mock()
-        response.code = 201
-        response.deliverBody = deliverFakeBodyFactory(self.get_http_body())
-        return defer.succeed(response)
+    def simulateHTTPPut(self, url, **kwds):
+        return self.simulateHTTPRequest('PUT', url, **kwds)
 
-    def http_delete(self, url, **kwds):
-        response = mock.Mock()
-        response.code = 200
-        response.deliverBody = deliverFakeBodyFactory(self.get_http_body())
-        return defer.succeed(response)
+    def simulateHTTPPost(self, url, **kwds):
+        return self.simulateHTTPRequest('POST', url, **kwds)
+
+    def simulateHTTPDelete(self, url, **kwds):
+        return self.simulateHTTPRequest('DELETE', url, **kwds)
+
 
 class Jinja2ViewProviderTest(TestCase):
     view_types = [VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, 

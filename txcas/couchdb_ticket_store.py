@@ -26,6 +26,7 @@ from txcas.utils import http_status_filter
 from dateutil.parser import parse as parse_date
 import treq
 from twisted.internet import defer
+from twisted.internet.task import LoopingCall
 from twisted.plugin import IPlugin
 from twisted.python import log
 from twisted.web.http_headers import Headers
@@ -135,9 +136,10 @@ class CouchDBTicketStore(object):
     pgt_lifespan = 60 * 60 * 2
     charset = string.ascii_letters + string.digits + '-'
     ticket_size = 256
-    poll_expired = 60 * 1
+    _check_expired_interval = 60 * 1
     service_manager = None
     _expired_margin = 60*2
+    _expirationLoop = None
 
     def __init__(self, couch_host, couch_port, couch_db,
                 couch_user, couch_passwd, use_https=True,
@@ -160,30 +162,28 @@ class CouchDBTicketStore(object):
             self._scheme = 'https://'
         else:
             self._scheme = 'http://'
-        
-        def startExpirations_():
-            if self.poll_expired > 0:
-                reactor.callLater(self.poll_expired, self._clean_expired)
+        self.createExpirationChecker()
 
-        reactor.callLater(0, startExpirations_)
-       
-    def _getServiceValidator(self):
-        service_mgr = self.service_manager
-        if service_mgr is None:
-            return (lambda x: True)
+    def createExpirationChecker(self):
+        if self._expirationLoop is not None:
+            self._expirationLoop.stop()
+        check_expired_interval = self.check_expired_interval
+        if check_expired_interval == 0:
+            self._expirationLoop = None
         else:
-            return service_mgr.isValidService
+            expirationLoop = LoopingCall(self._clean_expired)
+            expirationLoop.clock = self.reactor
+            expirationLoop.start(self.check_expired_interval, now=False)
+            self._expirationLoop = expirationLoop
 
-    def _getServiceSSOPredicate(self):
-        service_mgr = self.service_manager
-        if service_mgr is None:
-            return (lambda x: True)
-        else:
-            return service_mgr.isSSOService
- 
-    def debug(self, msg):
-        if self._debug:
-            log.msg(msg)
+    @property
+    def check_expired_interval(self):
+        return self._check_expired_interval
+
+    @check_expired_interval.setter
+    def check_expired_interval(self, value):
+        self._check_expired_interval = value
+        self.createExpirationChecker()
             
     @defer.inlineCallbacks
     def _clean_expired(self):
@@ -223,10 +223,24 @@ class CouchDBTicketStore(object):
                         log.err(ex)
         except Exception as ex:
             log.err(ex)
-        #Reschedule
-        yield self.reactor.callLater(self.poll_expired, self._clean_expired)
-        defer.returnValue(None)
-        
+       
+    def _getServiceValidator(self):
+        service_mgr = self.service_manager
+        if service_mgr is None:
+            return (lambda x: True)
+        else:
+            return service_mgr.isValidService
+
+    def _getServiceSSOPredicate(self):
+        service_mgr = self.service_manager
+        if service_mgr is None:
+            return (lambda x: True)
+        else:
+            return service_mgr.isSSOService
+ 
+    def debug(self, msg):
+        if self._debug:
+            log.msg(msg)
 
     def _validService(self, service):
         def cb(result):
@@ -532,6 +546,9 @@ class CouchDBTicketStore(object):
                 'primary_credentials': primaryCredentials,
                 'tgt': tgt_id,
             }, self.st_lifespan)
+        #NOTE: The TGT data has just been fetched, and we are going to fetch it
+        # *again* in the call to `_informTGTOfService`.  Seems like we should be
+        # able to skip that 2nd fetch for efficiency.
         yield self._informTGTOfService(ticket, service, tgt_id)
         defer.returnValue(ticket)  
 
@@ -550,7 +567,6 @@ class CouchDBTicketStore(object):
         """
         if not pgt.startswith("PGT-"):
             raise InvalidTicket()
-
         pgt_info = yield self._fetch_ticket(pgt)
         if pgt_info is None:
             raise InvalidTicket("PGT '%s' is invalid." % pgt)
@@ -632,8 +648,10 @@ class CouchDBTicketStore(object):
         else:
             new_proxy_chain = [pgturl]
         data[u'proxy_chain'] = new_proxy_chain 
-    
         pgt = yield self._mkTicket('PGT-', data, timeout=self.pgt_lifespan)
+        # NOTE: We just fetched the TGC above and as soon as we call 
+        # `_informTGTOfPGT`, we will immediately fetch the TGT again.
+        # Seems like there ought to be a way to use the just-fetched TGC.
         yield self._informTGTOfPGT(pgt, tgt)
         defer.returnValue({'iou': iou, 'pgt': pgt})
 
