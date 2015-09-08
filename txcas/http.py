@@ -1,79 +1,33 @@
 
-
 # Standard library
-import cgi
-import base64
-from StringIO import StringIO
-from urllib import urlencode
-import urlparse
-
+from __future__ import print_function
 # External modules
-from treq import content, text_content, json_content
-
-from twisted.internet import reactor
+from treq.client import HTTPClient
 from twisted.internet.ssl import ClientContextFactory
-from twisted.web.client import Agent, BrowserLikeRedirectAgent, \
-                            FileBodyProducer, readBody
-from twisted.python import log
-from twisted.web.http_headers import Headers
+from twisted.web.client import (
+    Agent, BrowserLikePolicyForHTTPS)
 
-class WebClientContextFactory(ClientContextFactory):
+
+class NonVerifyingContextFactory(ClientContextFactory):
     """
     Context factory does *not* verify SSL cert.
     """
     def getContext(self, hostname, port):
         return ClientContextFactory.getContext(self)
 
-def request(method, url, headers=None, params=None, data=None, auth=None, timeout=None):
-    p = urlparse.urlparse(url)
-    agent_args = [reactor]
-    contextFactory = WebClientContextFactory()
-    agent_args.append(contextFactory)
-    body = None
-    if data is not None:
-        body = FileBodyProducer(StringIO(data))
-    if params is not None:
-        if p.params == '':
-            param_str = urlencode(params, doseq=True)
-        else:
-            param_str = p.params + '&' + urlencode(params, doseq=True)
-        p = urlparse.ParseResult(*tuple(p[:4] + (param_str,) + p[5:]))
-        url = urlparse.urlunparse(p)
-    if auth is not None:
-        auth = "%s:%s" % auth
-        b64auth = base64.b64encode(auth)
-        auth = 'Basic %s' % b64auth
-        if headers is None:
-            headers = Headers({'Authorization': [auth]})
-        else:
-            if not headers.hasHeader('Authorization'):
-                headers.addRawHeader('Authorization', auth)
-
-    agent = BrowserLikeRedirectAgent(Agent(*agent_args))
-    d = agent.request(
-        method, 
-        url,
-        headers=headers,
-        bodyProducer=body)
-
-    if timeout is not None:
-        timeoutCall = reactor.callLater(timeout, d.cancel)
-        def completed(passthrough, timeoutCall):
-            if timeoutCall.active():
-                timeoutCall.cancel()
-            return passthrough
-        d.addBoth(completed, timeoutCall)
-        
+def normalizeDict_(d):
+    if d is None:
+        d = {}
+    else:
+        d = dict(d)
     return d
 
-def post(*args, **kwds):
-    return request('POST', *args, **kwds)
+def createNonVerifyingHTTPClient(reactor, agent_kwds=None, **kwds):
+    agent_kwds = normalizeDict_(agent_kwds)
+    agent_kwds['contextFactory'] = NonVerifyingContextFactory()
+    return HTTPClient(Agent(reactor, **agent_kwds), **kwds)
 
-def get(*args, **kwds):
-    return request('GET', *args, **kwds)
-
-def put(*args, **kwds):
-    return request('PUT', *args, **kwds)
-
-def delete(*args, **kwds):
-    return request('DELETE', *args, **kwds)
+def createVerifyingHTTPClient(reactor, agent_kwds=None, **kwds):
+    agent_kwds = normalizeDict_(agent_kwds)
+    agent_kwds['contextFactory'] = BrowserLikePolicyForHTTPS()
+    return HTTPClient(Agent(reactor, **agent_kwds), **kwds)

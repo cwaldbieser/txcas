@@ -1,9 +1,14 @@
 
 # Standard modules
+from __future__ import print_function
 from collections import defaultdict
 import ConfigParser
+import datetime
+import itertools
+import json
 import os
 import os.path
+import pprint
 import re
 from StringIO import StringIO
 import sys
@@ -28,15 +33,18 @@ from txcas.jinja_view_provider import Jinja2ViewProvider
 from txcas.server import ServerApp 
 from txcas.settings import load_defaults, export_settings_to_dict
 # External modules
+import mock
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
 from twisted.cred.error import UnauthorizedLogin, UnhandledCredentials
 from twisted.cred.portal import Portal, IRealm
 from twisted.internet import defer, task, reactor, utils, protocol
 from twisted.internet.address import IPv4Address
 from twisted.internet.interfaces import ISSLTransport
+#from twisted.internet.protocol import connectionDone
 from twisted.python.failure import Failure
 from twisted.python.filepath import FilePath
 from twisted.trial.unittest import TestCase
+from twisted.web.client import ResponseDone
 from twisted.web import microdom
 from twisted.web import server
 from twisted.web.http_headers import Headers
@@ -151,7 +159,6 @@ class TicketStoreTester(object):
     """
     Test a ticket store.
     """
-    
     ticket_size = 256
     service = "http://service.example.net/theservice"
     proxied_service = "http://service.example.net/the/proxied/service"
@@ -204,7 +211,6 @@ class TicketStoreTester(object):
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         # Create ticket.
         lt = yield store.mkLoginTicket(service)
         self.assertTrue(lt.startswith('LT-'))
@@ -212,12 +218,9 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_LT_validation(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         # Create ticket.
         lt = yield store.mkLoginTicket(service)
         # Use ticket.
@@ -225,12 +228,9 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_LT_invalid_spec(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         # Create ticket.
         lt = "Not a valid ticket"
         # Use ticket.
@@ -238,12 +238,9 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_LT_invalid_ticket(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         # Create ticket.
         lt = "LT-" + ('X'*max(ticket_size-3, 1))
         # Use ticket.
@@ -251,26 +248,22 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_LT_expired_ticket(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         # A ticket that expired over time should also fail.
         lt = yield store.mkLoginTicket(service)
         self.clock.advance(store.lt_lifespan)
-        yield self.assertFailure(store.useLoginTicket(lt, service), txcas.exceptions.InvalidTicket)
+        yield self.assertFailure(
+            store.useLoginTicket(lt, service), 
+            txcas.exceptions.InvalidTicket)
 
     @defer.inlineCallbacks
     def test_ST_spec(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         tgt = yield self.makeTicketGrantingCookie()
         st = yield store.mkServiceTicket(service, tgt, False)
         yield self.assertTrue(st.startswith('ST-'))
@@ -278,17 +271,13 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def _ST_validate(self, validate_func):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create ST
         tgt = yield self.makeTicketGrantingCookie()
         st = yield store.mkServiceTicket(service, tgt, False)
-        
         result = yield validate_func(st, service)
         stored_service = result['service']
         stored_avatar_id = result['avatar_id']
@@ -304,25 +293,16 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_ST_serviceValidate(self):
-        """
-        """
         yield self._ST_validate(self.store.useServiceTicket)
         
     @defer.inlineCallbacks
     def test_ST_proxyValidate(self):
-        """
-        """
         yield self._ST_validate(self.store.useServiceOrProxyTicket)
-        
- 
         
     @defer.inlineCallbacks
     def _ST_reuse(self, validate_func):
-        """
-        """
         store = self.store
         service = self.service
-        
         # Create ST
         tgt = yield self.makeTicketGrantingCookie()
         st = yield store.mkServiceTicket(service, tgt, False)
@@ -333,23 +313,16 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_ST_reuse_serviceValidate(self):
-        """
-        """
         yield self._ST_reuse(self.store.useServiceTicket)
         
     @defer.inlineCallbacks
     def test_ST_reuse_proxyValidate(self):
-        """
-        """
         yield self._ST_reuse(self.store.useServiceOrProxyTicket)
 
     @defer.inlineCallbacks
     def _ST_expire(self, validate_func):
-        """
-        """
         store = self.store
         service = self.service
-        
         tgt = yield self.makeTicketGrantingCookie()
         st = yield store.mkServiceTicket(service, tgt, False)
         self.clock.advance(store.st_lifespan)
@@ -357,23 +330,16 @@ class TicketStoreTester(object):
 
     @defer.inlineCallbacks
     def test_ST_expire_serviceValidate(self):
-        """
-        """
         yield self._ST_expire(self.store.useServiceTicket)
         
     @defer.inlineCallbacks
     def test_ST_expire_proxyValidate(self):
-        """
-        """
         yield self._ST_expire(self.store.useServiceOrProxyTicket)
         
     @defer.inlineCallbacks
     def _ST_bad_service(self, validate_func):
-        """
-        """
         store = self.store
         service = self.service
-        
         tgt = yield self.makeTicketGrantingCookie()
         st = yield store.mkServiceTicket(service, tgt, False)
         bad_service = service + '/badservice'
@@ -389,13 +355,10 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_spec(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -404,13 +367,10 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_serviceValidate(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -418,13 +378,10 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_proxyValidate(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -453,23 +410,17 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_bad_spec(self):
-        """
-        """
         store = self.store
         service = self.service
-        
         pt = 'XY-badticket'
         yield self.assertFailure(store.useServiceOrProxyTicket(pt, service), txcas.exceptions.InvalidTicket)
         
     @defer.inlineCallbacks
     def test_PT_reuse(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -478,24 +429,18 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_invalid(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-        
         pt = 'PT-' + 'x' * (max(1, ticket_size-3))
         yield self.assertFailure(store.useServiceOrProxyTicket(pt, service), txcas.exceptions.InvalidTicket)
         
     @defer.inlineCallbacks
     def test_PT_expire(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -504,13 +449,10 @@ class TicketStoreTester(object):
         
     @defer.inlineCallbacks
     def test_PT_bad_service(self):
-        """
-        """
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
         avatar_id = self.avatar_id
-        
         # Create PT
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
         pt = yield store.mkProxyTicket(service, pgt)
@@ -522,9 +464,7 @@ class TicketStoreTester(object):
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
-
         yield self.assertTrue(pgt.startswith('PGT-'))
         yield self.assertEqual(len(pgt), ticket_size)
         
@@ -532,11 +472,9 @@ class TicketStoreTester(object):
     def test_PGT_expire(self):
         store = self.store
         service = self.service
-
         tgt, st, pgt, iou = yield self.makeProxyGrantingTicket()
-
         # Should not be able to use PGT after it has expired.
-        self.clock.advance(store.pgt_lifespan)
+        self.clock.advance(store.pgt_lifespan*2)
         yield self.assertFailure(store.mkProxyTicket(service, pgt), txcas.exceptions.InvalidTicket)
         
     @defer.inlineCallbacks
@@ -544,7 +482,6 @@ class TicketStoreTester(object):
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-
         tgt = yield self.makeTicketGrantingCookie()
         yield self.assertTrue(tgt.startswith('TGC-'))
         yield self.assertEqual(len(tgt), ticket_size)
@@ -554,63 +491,802 @@ class TicketStoreTester(object):
         store = self.store
         ticket_size = self.ticket_size
         service = self.service
-
         tgt = yield self.makeTicketGrantingCookie()
         yield self.assertTrue(tgt.startswith('TGC-'))
         yield self.assertEqual(len(tgt), ticket_size)
-
         # Should not be able to use TGT after it has expired.
         self.clock.advance(store.tgt_lifespan)
         yield self.assertFailure(store.mkServiceTicket(service, tgt, False), txcas.exceptions.InvalidTicket)
 
 
 class InMemoryTicketStoreTest(TicketStoreTester, TestCase):
-    """
-    """
-        
+
     def getStore(self, clock):
         store = InMemoryTicketStore(reactor=clock, verify_cert=False)
         return store
-    
-class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
-    """
-    """
-    def __init__(self, *args, **kwds):
-        super(CouchDBTicketStoreTest, self).__init__(*args, **kwds)
+   
 
-        # Should these tests be run?
-        defaults = {'TESTS': {'couchdb_ticket_store': 0}}
-        scp = load_config(defaults=defaults)
-        couchdb_ticket_store = scp.getboolean('TESTS', 'couchdb_ticket_store')
-        if not couchdb_ticket_store:
-            self.__class__.skip = "Not configured to run CouchDB ticket store tests."
-            return
-        try:
-            if scp.has_section('CouchDB'):
-                self.couch_host = scp.get('CouchDB', 'host')
-                self.couch_port = scp.getint('CouchDB', 'port')
-                self.couch_db = scp.get('CouchDB', 'db')
-                self.couch_user = scp.get('CouchDB', 'user')
-                self.couch_passwd = scp.get('CouchDB', 'passwd')
-                self.use_https = scp.getboolean('CouchDB', 'https')
-                self.verify_cert = scp.getboolean('CouchDB', 'verify_cert')
-        except ConfigParser.Error as ex:
-            self.skip = "Could not read CouchDB settings: %s" % str(ex)
-            return
+def deliverFakeBodyFactory(data):
+    
+    def deliverFakeBody(proto):
+        proto.dataReceived(data)
+        proto.connectionLost(Failure(ResponseDone()))
+
+    return deliverFakeBody
+
+ 
+class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
+    couch_host = 'couch.example.org'
+    couch_port = 80
+    couch_db = 'cas_tickets'
+    couch_user = 'couch_user'
+    couch_passwd = 's3kr3t'
+    use_https = False
+    verify_cert = False
+    handleBeforeSimulatedHTTPResponse = None
+    debug = False
+
+    def setUp(self):
+        self.handleBeforeSimulatedHTTPResponse = lambda : None
+        self.requests = []
+        self.httpResponseGenerator = itertools.repeat("")
+        if self.use_https:
+            scheme = 'https'
+        else:
+            scheme = 'http'
+        patcher = mock.patch("txcas.couchdb_ticket_store.createNonVerifyingHTTPClient")
+        self.createNonVerifyingHTTPClient = patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch("txcas.couchdb_ticket_store.createVerifyingHTTPClient")
+        self.createVerifyingHTTPClient = patcher.start()
+        self.addCleanup(patcher.stop)
+        httpClient = mock.Mock()
+        self.createNonVerifyingHTTPClient.return_value = httpClient
+        self.createVerifyingHTTPClient.return_value = httpClient
+        httpClient.get.side_effect = self.simulateHTTPGet
+        httpClient.put.side_effect = self.simulateHTTPPut
+        httpClient.post.side_effect = self.simulateHTTPPost
+        httpClient.delete.side_effect = self.simulateHTTPDelete
+        patcher = mock.patch("txcas.couchdb_ticket_store.datetime")
+        self.datetime = patcher.start()
+        self.datetime.timedelta = datetime.timedelta
+        self.datetime.datetime.today = self.deterministic_now
+        self.addCleanup(patcher.stop)
+        super(CouchDBTicketStoreTest, self).setUp()
+
+    def test_LT_expired_ticket(self):
+        store = self.store
+        store.check_expired_interval = store.pgt_lifespan - 1
+        self.httpResponseGenerator = iter([
+            (201, "this response body doesn't matter."),
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'fakeid',
+                                '_rev': 1,
+                                'expires': self.deterministic_now().strftime(
+                                    "%Y-%m-%dT%H:%M:%S")
+                            },
+                        }
+                    ]}
+                )
+            ),
+            (201, "this response body doesn't matter."),
+        ])
+        return super(CouchDBTicketStoreTest, self).test_LT_expired_ticket()
+
+    def test_LT_spec(self):
+        self.httpResponseGenerator = iter([
+            (201, "this response body doesn't matter."),
+        ])
+        return super(CouchDBTicketStoreTest, self).test_LT_spec()
+
+    def test_LT_invalid_ticket(self):
+        self.httpResponseGenerator = iter([
+            (200, json.dumps({'rows': [],})),
+        ])
+        return super(CouchDBTicketStoreTest, self).test_LT_invalid_ticket()
+
+    def test_LT_validation(self):
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.lt_lifespan)
+        self.httpResponseGenerator = iter([
+            # POST - Create LT
+            (201, "this response body doesn't matter."),
+            # GET - Fetch LT
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'fakeid',
+                                '_rev': 1,
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S")
+                            },
+                        }
+                    ]
+                })
+            ),
+            # DELETE - Remove LT
+            (200, "this response body doesn't matter."),
+        ])
+        d = super(CouchDBTicketStoreTest, self).test_LT_validation()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_PGT_expire(self):
+        store = self.store
+        store.pgt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        store.check_expired_interval = store.pgt_lifespan - 1
+        responses = self._createProxyGrantingTicketHttpResponses()
+        responses.extend([
+            # GET - Expiration checker should fire here.
+            (200, json.dumps({'rows': []})),
+            # GET - Fetch PGT - will have expired.
+            (200, json.dumps({'rows': []})),
+        ])
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PGT_expire()
         
-        # No way to run the real-time tests.
-        methods = [
-            'test_LT_expired_ticket',
-            'test_PGT_expire',
-            'test_PT_expire',
-            'test_ST_expire_proxyValidate',
-            'test_ST_expire_serviceValidate',
-            'test_TGT_expire',
+        def assertExpiredTicketCleanerCalled(result):
+            requests = self.requests
+            self.assertEqual(len(requests), len(responses))
+            method, url, kwds = requests[-2]
+            self.assertEqual(method, 'GET')
+            self.assertTrue(url.endswith('/_design/views/_view/get_by_expires'))
+            return result
+
+        d.addCallback(assertExpiredTicketCleanerCalled)
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_PGT_spec(self):
+        responses = self._createProxyGrantingTicketHttpResponses()
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PGT_spec()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_PT_bad_service(self):
+        store = self.store
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createProxyTicketHttpResponses()
+        responses.extend([
+            # GET - Fetch PT
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'pt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # DELETE - Remove PT
+            (200, json.dumps({'msg': "this response body must be JSON."})),
+        ])
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_bad_service()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+    
+    def test_PT_expire(self):
+        store = self.store
+        store.pt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        store.check_expired_interval = store.pt_lifespan - 1
+        responses = self._createProxyTicketHttpResponses()
+        responses.extend([
+            # GET - Expiration checker should fire here.
+            (200, json.dumps({'rows': []})),
+            # GET - Fetch PT
+            (
+                200,
+                json.dumps({'rows': []})
+            ),
+        ])
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_expire()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_PT_invalid(self):
+        store = self.store
+        store.pt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = [
+            # GET - Fetch PT
+            (
+                200,
+                json.dumps({'rows': []})
+            ),
         ]
-        for method_name in methods:
-            fn = getattr(self.__class__, method_name)
-            fn.__func__.skip = "Only real-time expirations work with this ticket store."
-        
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_invalid()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_PT_proxyValidate(self):
+        store = self.store
+        store.pt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createProxyTicketHttpResponses()
+
+        def _extractTGC():
+            if len(self.requests) == 7:
+                data = self.requests[0][2]['data']
+                doc = json.loads(data)
+                tgt = doc['ticket_id']
+                data = self.requests[6][2]['data']
+                doc = json.loads(data)
+                pgt = doc['ticket_id']
+                pgturl = doc['pgturl']
+                proxy_chain = doc['proxy_chain']
+                responses.extend([
+                    # GET - Fetch PT
+                    (
+                        200,
+                        json.dumps({
+                            'rows': [
+                                {
+                                    'value': {
+                                        'service': self.service,
+                                        '_id': 'pt-fakeid',
+                                        '_rev': '1',
+                                        'expires': later.strftime(
+                                            "%Y-%m-%dT%H:%M:%S"),
+                                        'avatar_id': self.avatar_id,
+                                        'tgt': tgt,
+                                        'pgt': pgt,
+                                        'pgturl': pgturl,
+                                        'proxy_chain': proxy_chain,
+                                        'primary_credentials': True,
+                                    },
+                                }
+                            ]
+                        })
+                    ),
+                    # DELETE - delete PT
+                    (200, json.dumps({'msg': 'PT deleted.'})),
+                ])
+
+        self.handleBeforeSimulatedHTTPResponse = _extractTGC
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_proxyValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_PT_reuse(self):
+        store = self.store
+        store.pt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createProxyTicketHttpResponses()
+
+        def _extractTGC():
+            if len(self.requests) == 7:
+                data = self.requests[0][2]['data']
+                doc = json.loads(data)
+                tgt = doc['ticket_id']
+                data = self.requests[6][2]['data']
+                doc = json.loads(data)
+                pgt = doc['ticket_id']
+                pgturl = doc['pgturl']
+                proxy_chain = doc['proxy_chain']
+                responses.extend([
+                    # GET - Fetch PT
+                    (
+                        200,
+                        json.dumps({
+                            'rows': [
+                                {
+                                    'value': {
+                                        'service': self.service,
+                                        '_id': 'pt-fakeid',
+                                        '_rev': '1',
+                                        'expires': later.strftime(
+                                            "%Y-%m-%dT%H:%M:%S"),
+                                        'avatar_id': self.avatar_id,
+                                        'tgt': tgt,
+                                        'pgt': pgt,
+                                        'pgturl': pgturl,
+                                        'proxy_chain': proxy_chain,
+                                        'primary_credentials': True,
+                                    },
+                                }
+                            ]
+                        })
+                    ),
+                    # DELETE - delete PT
+                    (200, json.dumps({'msg': 'PT deleted.'})),
+                    # GET - Fetch PT
+                    (200, json.dumps({'rows': []})),
+                ])
+
+        def _assertProxyTicketReused(result):
+            requests = self.requests
+            pt0 = requests[-3][2]['params']['key']
+            pt1 = requests[-1][2]['params']['key']
+            self.assertEqual(pt0, pt1)
+            return result
+            
+        self.handleBeforeSimulatedHTTPResponse = _extractTGC
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_reuse()
+        d.addCallback(_assertProxyTicketReused)
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_PT_serviceValidate(self):
+        store = self.store
+        store.pt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createProxyTicketHttpResponses()
+
+        def _extractTGC():
+            if len(self.requests) == 7:
+                data = self.requests[0][2]['data']
+                doc = json.loads(data)
+                tgt = doc['ticket_id']
+                data = self.requests[6][2]['data']
+                doc = json.loads(data)
+                pgt = doc['ticket_id']
+                pgturl = doc['pgturl']
+                proxy_chain = doc['proxy_chain']
+                responses.extend([
+                    # GET - Fetch PT
+                    (
+                        200,
+                        json.dumps({
+                            'rows': [
+                                {
+                                    'value': {
+                                        'service': self.service,
+                                        '_id': 'pt-fakeid',
+                                        '_rev': '1',
+                                        'expires': later.strftime(
+                                            "%Y-%m-%dT%H:%M:%S"),
+                                        'avatar_id': self.avatar_id,
+                                        'tgt': tgt,
+                                        'pgt': pgt,
+                                        'pgturl': pgturl,
+                                        'proxy_chain': proxy_chain,
+                                        'primary_credentials': True,
+                                    },
+                                }
+                            ]
+                        })
+                    ),
+                    # DELETE - delete PT
+                    (200, json.dumps({'msg': 'PT deleted.'})),
+                ])
+
+        self.handleBeforeSimulatedHTTPResponse = _extractTGC
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_serviceValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+    
+    def test_PT_spec(self):
+        store = self.store
+        store.pt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createProxyTicketHttpResponses()
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_spec()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_ST_bad_service_proxyValidate(self):
+        responses = self._createServiceTicketHttpResponses()
+        responses.extend(self._createValidateTicketHTTPResponses())
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_bad_service_proxyValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_ST_bad_service_serviceValidate(self):
+        responses = self._createServiceTicketHttpResponses()
+        responses.extend(self._createValidateTicketHTTPResponses())
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_bad_service_serviceValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_ST_expire_proxyValidate(self):
+        store = self.store
+        store.st_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        store.check_expired_interval = store.st_lifespan - 1
+        responses = self._createServiceTicketHttpResponses()
+        responses.extend([
+            # GET - Expiration checker should fire here.
+            (200, json.dumps({'rows': []})),
+            # GET - Fetch ST
+            (
+                200,
+                json.dumps({'rows': []})
+            ),
+        ])
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_expire_proxyValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_ST_expire_serviceValidate(self):
+        store = self.store
+        store.st_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        store.check_expired_interval = store.st_lifespan - 1
+        responses = self._createServiceTicketHttpResponses()
+        responses.extend([
+            # GET - Expiration checker should fire here.
+            (200, json.dumps({'rows': []})),
+            # GET - Fetch ST
+            (
+                200,
+                json.dumps({'rows': []})
+            ),
+        ])
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_expire_serviceValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_ST_proxyValidate(self):
+        responses = self._createServiceTicketHttpResponses()
+
+        def _extractTGC():
+            if len(self.requests) == 1:
+                data = self.requests[0][2]['data']
+                doc = json.loads(data)
+                tgt = doc['ticket_id']
+                responses.extend(
+                    self._createValidateTicketHTTPResponses(tgt=tgt))
+
+        self.handleBeforeSimulatedHTTPResponse = _extractTGC
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_proxyValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_ST_reuse_proxyValidate(self):
+        responses = self._createServiceTicketHttpResponses()
+
+        def _extractTGC():
+            if len(self.requests) == 1:
+                data = self.requests[0][2]['data']
+                doc = json.loads(data)
+                tgt = doc['ticket_id']
+                responses.extend(
+                    self._createValidateTicketHTTPResponses(tgt=tgt))
+                responses.append((200, json.dumps({'rows': []})))
+
+        self.handleBeforeSimulatedHTTPResponse = _extractTGC
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_reuse_proxyValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_ST_reuse_serviceValidate(self):
+        responses = self._createServiceTicketHttpResponses()
+
+        def _extractTGC():
+            if len(self.requests) == 1:
+                data = self.requests[0][2]['data']
+                doc = json.loads(data)
+                tgt = doc['ticket_id']
+                responses.extend(
+                    self._createValidateTicketHTTPResponses(tgt=tgt))
+                responses.append((200, json.dumps({'rows': []})))
+
+        self.handleBeforeSimulatedHTTPResponse = _extractTGC
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_reuse_serviceValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_ST_serviceValidate(self):
+        responses = self._createServiceTicketHttpResponses()
+
+        def _extractTGC():
+            if len(self.requests) == 1:
+                data = self.requests[0][2]['data']
+                doc = json.loads(data)
+                tgt = doc['ticket_id']
+                responses.extend(
+                    self._createValidateTicketHTTPResponses(tgt=tgt))
+
+        self.handleBeforeSimulatedHTTPResponse = _extractTGC
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_serviceValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_ST_spec(self):
+        responses = self._createServiceTicketHttpResponses()
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_spec()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_TGT_expire(self):
+        store = self.store
+        store.tgt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        store.check_expired_interval = store.tgt_lifespan - 1
+        responses = self._createTGTHttpResponses()
+        responses.append((200, json.dumps({'rows': []})))
+        responses.append((200, json.dumps({'rows': []})))
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_TGT_expire()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def test_TGT_spec(self):
+        responses = self._createTGTHttpResponses()
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_TGT_spec()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
+    def _createTGTHttpResponses(self):
+        store = self.store
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = [
+            # POST - Create TGC
+            (201, "this response body doesn't matter."),
+        ]
+        return responses
+
+    def _createServiceTicketHttpResponses(self):
+        store = self.store
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createTGTHttpResponses()
+        responses.extend([
+            # Create ST
+            # 1)  GET - Fetch TGC
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'tgt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # 2) POST - Create ST
+            (
+                201,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'st-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                                'tgt': 'tgt-fakeid',
+                                'primary_credentials': True,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # 3) GET - Fetch TGT
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'tgt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # 4) PUT - Modify TGC to have reference to ST
+            (201, json.dumps({'msg': "this response body must be JSON."})),
+        ])
+        return responses
+
+    def _createProxyGrantingTicketHttpResponses(self):
+        store = self.store
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createServiceTicketHttpResponses()
+        responses.extend([
+            # Make the PGT
+            # 1) GET - Fetch a the TGC
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'tgt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # 2) POST - Create the PGT
+            (201, "Response from creating a PGT."),
+            # *3) GET - Fetch a the TGC
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'tgt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # Update TGC with PGT reference.
+            (201, json.dumps({'msg': "this response body must be JSON."})),
+        ])
+        return responses
+
+    def _createProxyTicketHttpResponses(self):
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createProxyGrantingTicketHttpResponses()
+        responses.extend([
+            # GET - fetch PGT
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'pgt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'pgturl': self.pgturl,
+                                'tgt': 'fake-tgtid',
+                                'avatar_id': self.avatar_id,
+                                'proxy_chain': [],
+                            },
+                        }
+                    ]
+                })
+            ),
+            # POST - create PT
+            (201, json.dumps({'msg': "this response body must be JSON."})),
+            # GET - fetch TGC
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'tgt-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # PUT - add service to TGC
+            (201, json.dumps({'msg': "this response body must be JSON."})),
+        ])
+        return responses
+
+    def _createValidateTicketHTTPResponses(self, tgt='tgt-fakeid'):
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = [
+            # GET - fetch the ticket.
+            (
+                200,
+                json.dumps({
+                    'rows': [
+                        {
+                            'value': {
+                                'service': self.service,
+                                '_id': 'st-fakeid',
+                                '_rev': '1',
+                                'expires': later.strftime(
+                                    "%Y-%m-%dT%H:%M:%S"),
+                                'avatar_id': self.avatar_id,
+                                'tgt': tgt,
+                                'primary_credentials': True,
+                            },
+                        }
+                    ]
+                })
+            ),
+            # DELETE - Remove the used ticket.
+            (200, json.dumps({'msg': "this response body must be JSON."})),
+        ]
+        return responses
+
     def getStore(self, clock):
         store = CouchDBTicketStore(
                     self.couch_host, 
@@ -621,11 +1297,51 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
                     self.use_https,
                     reactor=clock, 
                     verify_cert=self.verify_cert)
+        store.check_expired_interval = 0
         return store
 
+    def deterministic_now(self):
+        return datetime.datetime.fromtimestamp(self.clock.seconds())
+        
+    def _printRequests(self, result):
+        for req in self.requests:
+            method, url, kwds = req
+            print('METHOD: {0}'.format(method), file=sys.stderr)
+            print('URL: {0}'.format(url), file=sys.stderr)
+            pprint.pprint(kwds, stream=sys.stderr)
+            print('', file=sys.stderr)
+        return result
+
+    def getNextHTTPResponse(self):
+        try:
+            value = self.httpResponseGenerator.next()
+        except StopIteration:
+            value = (500, "Ran out of HTTP responses!")
+        return value
+
+    def simulateHTTPRequest(self, method, url, **kwds):
+        self.requests.append((method, url, kwds))
+        self.handleBeforeSimulatedHTTPResponse()
+        response = mock.Mock()
+        code, body = self.getNextHTTPResponse()
+        response.code = code
+        response.deliverBody = deliverFakeBodyFactory(body)
+        return defer.succeed(response)
+
+    def simulateHTTPGet(self, url, **kwds):
+        return self.simulateHTTPRequest('GET', url, **kwds)
+
+    def simulateHTTPPut(self, url, **kwds):
+        return self.simulateHTTPRequest('PUT', url, **kwds)
+
+    def simulateHTTPPost(self, url, **kwds):
+        return self.simulateHTTPRequest('POST', url, **kwds)
+
+    def simulateHTTPDelete(self, url, **kwds):
+        return self.simulateHTTPRequest('DELETE', url, **kwds)
+
+
 class Jinja2ViewProviderTest(TestCase):
-    """
-    """
     view_types = [VIEW_LOGIN, VIEW_LOGIN_SUCCESS, VIEW_LOGOUT, 
                 VIEW_INVALID_SERVICE, VIEW_ERROR_5XX, 
                 VIEW_NOT_FOUND,]

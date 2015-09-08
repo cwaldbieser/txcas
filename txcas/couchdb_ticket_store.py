@@ -1,5 +1,6 @@
 
 # Standard library
+from __future__ import print_function
 import datetime
 import json
 import random
@@ -12,18 +13,20 @@ from xml.sax.saxutils import escape as xml_escape
 from txcas.exceptions import (
     CASError, InvalidTicket, InvalidService,
     NotSSOService, InvalidTicketSpec)
-import txcas.http
+from txcas.http import (
+    createNonVerifyingHTTPClient, createVerifyingHTTPClient)
 from txcas.interface import (
     ITicketStore, ITicketStoreFactory,
     IServiceManagerAcceptor)
 from txcas.settings import get_bool, export_settings_to_dict, load_settings
 from txcas.urls import are_urls_equal
-from txcas.utils import http_status_filter
-
+from txcas.utils import (
+    filter_args, get_missing_args, http_status_filter, unwrap_failures)
 # External modules
 from dateutil.parser import parse as parse_date
 import treq
-from twisted.internet import defer, reactor
+from twisted.internet import defer
+from twisted.internet.task import LoopingCall
 from twisted.plugin import IPlugin
 from twisted.python import log
 from twisted.web.http_headers import Headers
@@ -84,7 +87,7 @@ class CouchDBTicketStoreFactory(object):
         if argstring.strip() != "":
             argdict = dict((x.split('=') for x in argstring.split(':')))
             ts_settings.update(argdict)
-        missing = txcas.utils.get_missing_args(
+        missing = get_missing_args(
                     CouchDBTicketStore.__init__, ts_settings, ['self'])
         if len(missing) > 0:
             sys.stderr.write(
@@ -96,7 +99,7 @@ class CouchDBTicketStoreFactory(object):
                 'lt_lifespan', 'st_lifespan', 'pt_lifespan', 
                 'tgt_lifespan', 'pgt_lifespan', 'ticket_size', '_debug')
         ts_props = dict((prop, int(ts_props[prop])) for prop in props if prop in ts_props)
-        txcas.utils.filter_args(CouchDBTicketStore.__init__, ts_settings, ['self'])
+        filter_args(CouchDBTicketStore.__init__, ts_settings, ['self'])
         if 'couch_port' in ts_settings:
             ts_settings['couch_port'] = int(ts_settings['couch_port'])
         if 'use_https' in ts_settings:
@@ -126,7 +129,6 @@ class CouchDBTicketStore(object):
     A ticket store that uses an external CouchDB.
     """
     implements(IPlugin, ITicketStore, IServiceManagerAcceptor)
-
     lt_lifespan = 60*5
     st_lifespan = 10
     pt_lifespan = 10
@@ -134,14 +136,16 @@ class CouchDBTicketStore(object):
     pgt_lifespan = 60 * 60 * 2
     charset = string.ascii_letters + string.digits + '-'
     ticket_size = 256
-    poll_expired = 60 * 1
+    _check_expired_interval = 60 * 1
     service_manager = None
     _expired_margin = 60*2
-
+    _expirationLoop = None
 
     def __init__(self, couch_host, couch_port, couch_db,
                 couch_user, couch_passwd, use_https=True,
-                reactor=reactor, _debug=False, verify_cert=True):
+                reactor=None, _debug=False, verify_cert=True):
+        if reactor is None:
+            from twisted.internet import reactor
         self.reactor = reactor
         self._debug = _debug
         self._expire_callback = (lambda ticket, data, explicit: None)
@@ -151,32 +155,35 @@ class CouchDBTicketStore(object):
         self._couch_user = couch_user
         self._couch_passwd = couch_passwd
         if verify_cert:
-            self.reqlib = treq
+            self.httpClientFactory = createVerifyingHTTPClient
         else:
-            self.reqlib = txcas.http
+            self.httpClientFactory = createNonVerifyingHTTPClient
         if use_https:
             self._scheme = 'https://'
         else:
             self._scheme = 'http://'
-        reactor.callLater(self.poll_expired, self._clean_expired)
-       
-    def _getServiceValidator(self):
-        service_mgr = self.service_manager
-        if service_mgr is None:
-            return (lambda x: True)
-        else:
-            return service_mgr.isValidService
+        self.createExpirationChecker()
 
-    def _getServiceSSOPredicate(self):
-        service_mgr = self.service_manager
-        if service_mgr is None:
-            return (lambda x: True)
+    def createExpirationChecker(self):
+        if self._expirationLoop is not None:
+            self._expirationLoop.stop()
+        check_expired_interval = self.check_expired_interval
+        if check_expired_interval == 0:
+            self._expirationLoop = None
         else:
-            return service_mgr.isSSOService
- 
-    def debug(self, msg):
-        if self._debug:
-            log.msg(msg)
+            expirationLoop = LoopingCall(self._clean_expired)
+            expirationLoop.clock = self.reactor
+            expirationLoop.start(self.check_expired_interval, now=False)
+            self._expirationLoop = expirationLoop
+
+    @property
+    def check_expired_interval(self):
+        return self._check_expired_interval
+
+    @check_expired_interval.setter
+    def check_expired_interval(self, value):
+        self._check_expired_interval = value
+        self.createExpirationChecker()
             
     @defer.inlineCallbacks
     def _clean_expired(self):
@@ -197,13 +204,13 @@ class CouchDBTicketStore(object):
                     }
             self.debug("[DEBUG][CouchDB] _clean_expired(), url: %s" % url)
             self.debug("[DEBUG][CouchDB] _clean_expired(), params: %s" % str(params))
-            reqlib = self.reqlib
-            response = yield reqlib.get(url, 
+            httpClient = self.httpClientFactory(self.reactor)
+            response = yield httpClient.get(url, 
                         params=params, 
                         headers=Headers({'Accept': ['application/json']}),
                         auth=(self._couch_user, self._couch_passwd))
             response = yield http_status_filter(response, [(200,200)], CouchDBError)
-            doc = yield reqlib.json_content(response)
+            doc = yield treq.json_content(response)
             rows = doc[u'rows']
             if len(rows) > 0:
                 del_docs = []
@@ -216,10 +223,24 @@ class CouchDBTicketStore(object):
                         log.err(ex)
         except Exception as ex:
             log.err(ex)
-        #Reschedule
-        yield self.reactor.callLater(self.poll_expired, self._clean_expired)
-        defer.returnValue(None)
-        
+       
+    def _getServiceValidator(self):
+        service_mgr = self.service_manager
+        if service_mgr is None:
+            return (lambda x: True)
+        else:
+            return service_mgr.isValidService
+
+    def _getServiceSSOPredicate(self):
+        service_mgr = self.service_manager
+        if service_mgr is None:
+            return (lambda x: True)
+        else:
+            return service_mgr.isSSOService
+ 
+    def debug(self, msg):
+        if self._debug:
+            log.msg(msg)
 
     def _validService(self, service):
         def cb(result):
@@ -274,13 +295,14 @@ class CouchDBTicketStore(object):
             self.debug("[DEBUG][CouchDB] _mkTicket(), ticket: %s" % ticket)
             return ticket
            
-        reqlib = self.reqlib 
-        d = reqlib.post(url, data=doc, auth=(self._couch_user, self._couch_passwd),
+        httpClient = self.httpClientFactory(self.reactor)
+        d = httpClient.post(url, data=doc, auth=(self._couch_user, self._couch_passwd),
                         headers=Headers({
                             'Accept': ['application/json'], 
                             'Content-Type': ['application/json']}))
+
         d.addCallback(http_status_filter, [(201,201)], CouchDBError)
-        d.addCallback(reqlib.content)
+        d.addCallback(treq.content)
         d.addCallback(return_ticket, ticket)
         return d
 
@@ -298,13 +320,13 @@ class CouchDBTicketStore(object):
         params = {'key': json.dumps(ticket.encode('utf-8'))}
         self.debug("[DEBUG][CouchDB] _fetch_ticket(), url: %s" % url)
         self.debug("[DEBUG][CouchDB] _fetch_ticket(), params: %s" % str(params))
-        reqlib = self.reqlib
-        response = yield reqlib.get(url, 
+        httpClient = self.httpClientFactory(self.reactor)
+        response = yield httpClient.get(url, 
                     params=params, 
                     headers=Headers({'Accept': ['application/json']}),
                     auth=(self._couch_user, self._couch_passwd))
         response = yield http_status_filter(response, [(200,200)], CouchDBError)
-        doc = yield reqlib.json_content(response)
+        doc = yield treq.json_content(response)
         rows = doc[u'rows']
         if len(rows) > 0:
             entry = rows[0][u'value']
@@ -335,10 +357,10 @@ class CouchDBTicketStore(object):
         except Exception as ex:
             self.debug("[DEBUG][CouchDB] Failed to serialze doc:\n%s" % (str(data)))
             raise
-        reqlib = self.reqlib
+        httpClient = self.httpClientFactory(self.reactor)
         self.debug('''[DEBUG][CouchDB] request_method="PUT" url="{0}"'''.format(url))
         self.debug('''[DEBUG][CouchDB] document => {0}'''.format(data))
-        response = yield reqlib.put(
+        response = yield httpClient.put(
                             url, 
                             data=doc, 
                             auth=(self._couch_user, self._couch_passwd),
@@ -346,7 +368,7 @@ class CouchDBTicketStore(object):
                                 'Accept': ['application/json'], 
                                 'Content-Type': ['application/json']}))
         response = yield http_status_filter(response, [(201,201)], CouchDBError)
-        doc = yield reqlib.json_content(response)
+        doc = yield treq.json_content(response)
         defer.returnValue(None)
 
     @defer.inlineCallbacks
@@ -364,14 +386,14 @@ class CouchDBTicketStore(object):
         params = {'rev': _rev}
         self.debug('[DEBUG][CouchDB] _delete_ticket(), url: %s' % url)
         self.debug('[DEBUG][CouchDB] _delete_ticket(), params: %s' % str(params))
-        reqlib = self.reqlib
-        response = yield reqlib.delete(
+        httpClient = self.httpClientFactory(self.reactor)
+        response = yield httpClient.delete(
                             url,
                             params=params, 
                             auth=(self._couch_user, self._couch_passwd),
                             headers=Headers({'Accept': ['application/json']}))
         response = yield http_status_filter(response, [(200,200)], CouchDBError)
-        resp_text = yield reqlib.content(response)
+        resp_text = yield treq.content(response)
         defer.returnValue(None)
 
     @defer.inlineCallbacks
@@ -475,12 +497,13 @@ class CouchDBTicketStore(object):
         Create a login ticket.
         """
         d = self._validService(service)
+
         def cb(_):
             return self._mkTicket('LT-', {
                 'service': service,
             }, timeout=self.lt_lifespan)
-        return d.addCallback(cb)
 
+        return d.addCallback(cb)
 
     def useLoginTicket(self, ticket, service):
         """
@@ -500,6 +523,7 @@ class CouchDBTicketStore(object):
                             recorded_service, service)))
 
             return d.addCallback(cb)
+
         return self._validService(service).addCallback(doit)
 
     @defer.inlineCallbacks
@@ -522,6 +546,9 @@ class CouchDBTicketStore(object):
                 'primary_credentials': primaryCredentials,
                 'tgt': tgt_id,
             }, self.st_lifespan)
+        #NOTE: The TGT data has just been fetched, and we are going to fetch it
+        # *again* in the call to `_informTGTOfService`.  Seems like we should be
+        # able to skip that 2nd fetch for efficiency.
         yield self._informTGTOfService(ticket, service, tgt_id)
         defer.returnValue(ticket)  
 
@@ -540,7 +567,6 @@ class CouchDBTicketStore(object):
         """
         if not pgt.startswith("PGT-"):
             raise InvalidTicket()
-
         pgt_info = yield self._fetch_ticket(pgt)
         if pgt_info is None:
             raise InvalidTicket("PGT '%s' is invalid." % pgt)
@@ -622,8 +648,10 @@ class CouchDBTicketStore(object):
         else:
             new_proxy_chain = [pgturl]
         data[u'proxy_chain'] = new_proxy_chain 
-    
         pgt = yield self._mkTicket('PGT-', data, timeout=self.pgt_lifespan)
+        # NOTE: We just fetched the TGC above and as soon as we call 
+        # `_informTGTOfPGT`, we will immediately fetch the TGT again.
+        # Seems like there ought to be a way to use the just-fetched TGC.
         yield self._informTGTOfPGT(pgt, tgt)
         defer.returnValue({'iou': iou, 'pgt': pgt})
 
@@ -687,31 +715,32 @@ class CouchDBTicketStore(object):
 
     def _notifyServicesSLO(self, services):
         template = self._samlLogoutTemplate
+
+        def logerr(err, service):
+            log.msg("Error sending SLO to service '%s'." % service)
+            log.err(err)
+            errs = unwrap_failures(err)
+            for error in errs:
+                log.err(error)
+            return err
+
         dlist = []
         for service, st in services.iteritems():
             dt = datetime.datetime.utcnow()
             issue_instant = dt.strftime("%Y-%m-%dT%H:%M:%S")
             identifier = str(uuid.uuid4())
-            
             data = template % {
                 'identifier': xml_escape(identifier),
                 'issue_instant': xml_escape(issue_instant),
                 'service_ticket': xml_escape(st)
             }
-            reqlib = self.reqlib
-            def logerr(err, service):
-                log.msg("Error sending SLO to service '%s'." % service)
-                log.err(err)
-                errs = txcas.utils.unwrap_failures(err)
-                for error in errs:
-                    log.err(error)
-                return err
-            d = reqlib.post(
+            httpClient = self.httpClientFactory(self.reactor)
+            d = httpClient.post(
                     service.encode('utf-8'), 
                     headers=Headers({'Content-Type': ['application/xml']}),
                     data=data.encode('utf-8'), 
                     timeout=30).addCallback(
-                reqlib.content).addErrback(
+                treq.content).addErrback(
                 logerr, service)
             dlist.append(d)
         return defer.DeferredList(dlist, consumeErrors=True)
