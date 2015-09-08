@@ -20,8 +20,8 @@ from txcas.interface import (
     IServiceManagerAcceptor)
 from txcas.settings import get_bool, export_settings_to_dict, load_settings
 from txcas.urls import are_urls_equal
-from txcas.utils import http_status_filter
-
+from txcas.utils import (
+    filter_args, get_missing_args, http_status_filter, unwrap_failures)
 # External modules
 from dateutil.parser import parse as parse_date
 import treq
@@ -87,7 +87,7 @@ class CouchDBTicketStoreFactory(object):
         if argstring.strip() != "":
             argdict = dict((x.split('=') for x in argstring.split(':')))
             ts_settings.update(argdict)
-        missing = txcas.utils.get_missing_args(
+        missing = get_missing_args(
                     CouchDBTicketStore.__init__, ts_settings, ['self'])
         if len(missing) > 0:
             sys.stderr.write(
@@ -99,7 +99,7 @@ class CouchDBTicketStoreFactory(object):
                 'lt_lifespan', 'st_lifespan', 'pt_lifespan', 
                 'tgt_lifespan', 'pgt_lifespan', 'ticket_size', '_debug')
         ts_props = dict((prop, int(ts_props[prop])) for prop in props if prop in ts_props)
-        txcas.utils.filter_args(CouchDBTicketStore.__init__, ts_settings, ['self'])
+        filter_args(CouchDBTicketStore.__init__, ts_settings, ['self'])
         if 'couch_port' in ts_settings:
             ts_settings['couch_port'] = int(ts_settings['couch_port'])
         if 'use_https' in ts_settings:
@@ -719,7 +719,7 @@ class CouchDBTicketStore(object):
         def logerr(err, service):
             log.msg("Error sending SLO to service '%s'." % service)
             log.err(err)
-            errs = txcas.utils.unwrap_failures(err)
+            errs = unwrap_failures(err)
             for error in errs:
                 log.err(error)
             return err
