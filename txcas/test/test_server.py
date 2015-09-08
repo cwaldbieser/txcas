@@ -899,6 +899,18 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
         if self.debug:
             d.addBoth(self._printRequests)
         return d
+    
+    def test_PT_spec(self):
+        store = self.store
+        store.pt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        responses = self._createPTHTTPResponses()
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_PT_spec()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
 
     def _createPTHTTPResponses(self):
         responses = self._createPGTHTTPResponses()
