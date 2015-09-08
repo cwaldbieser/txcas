@@ -1030,6 +1030,24 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
             d.addBoth(self._printRequests)
         return d
 
+    def test_ST_serviceValidate(self):
+        responses = self._createServiceTicketHttpResponses()
+
+        def _extractTGC():
+            if len(self.requests) == 1:
+                data = self.requests[0][2]['data']
+                doc = json.loads(data)
+                tgt = doc['ticket_id']
+                responses.extend(
+                    self._createValidateTicketHTTPResponses(tgt=tgt))
+
+        self.handleBeforeSimulatedHTTPResponse = _extractTGC
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_serviceValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
     def _createTGTHttpResponses(self):
         store = self.store
         later = self.deterministic_now() + datetime.timedelta(
