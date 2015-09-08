@@ -974,6 +974,24 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
             d.addBoth(self._printRequests)
         return d
 
+    def test_ST_proxyValidate(self):
+        responses = self._createServiceTicketHttpResponses()
+
+        def _extractTGC():
+            if len(self.requests) == 1:
+                data = self.requests[0][2]['data']
+                doc = json.loads(data)
+                tgt = doc['ticket_id']
+                responses.extend(
+                    self._createValidateTicketHTTPResponses(tgt=tgt))
+
+        self.handleBeforeSimulatedHTTPResponse = _extractTGC
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_proxyValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
     def _createTGTHttpResponses(self):
         store = self.store
         later = self.deterministic_now() + datetime.timedelta(
@@ -1017,7 +1035,7 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
                         {
                             'value': {
                                 'service': self.service,
-                                '_id': 'fakeid',
+                                '_id': 'st-fakeid',
                                 '_rev': '1',
                                 'expires': later.strftime(
                                     "%Y-%m-%dT%H:%M:%S"),
@@ -1153,11 +1171,11 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
         ])
         return responses
 
-    def _createValidateTicketHTTPResponses(self):
+    def _createValidateTicketHTTPResponses(self, tgt='tgt-fakeid'):
         later = self.deterministic_now() + datetime.timedelta(
             2*self.store.tgt_lifespan)
         responses = [
-            # GET - fetch the TGC.
+            # GET - fetch the ticket.
             (
                 200,
                 json.dumps({
@@ -1165,11 +1183,13 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
                         {
                             'value': {
                                 'service': self.service,
-                                '_id': 'tgt-fakeid',
+                                '_id': 'st-fakeid',
                                 '_rev': '1',
                                 'expires': later.strftime(
                                     "%Y-%m-%dT%H:%M:%S"),
                                 'avatar_id': self.avatar_id,
+                                'tgt': tgt,
+                                'primary_credentials': True,
                             },
                         }
                     ]
