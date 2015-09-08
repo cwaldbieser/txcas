@@ -930,6 +930,28 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
             d.addBoth(self._printRequests)
         return d
 
+    def test_ST_expire_proxyValidate(self):
+        store = self.store
+        store.st_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        store.check_expired_interval = store.st_lifespan - 1
+        responses = self._createServiceTicketHttpResponses()
+        responses.extend([
+            # GET - Expiration checker should fire here.
+            (200, json.dumps({'rows': []})),
+            # GET - Fetch ST
+            (
+                200,
+                json.dumps({'rows': []})
+            ),
+        ])
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_expire_proxyValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
     def _createTGTHttpResponses(self):
         store = self.store
         later = self.deterministic_now() + datetime.timedelta(
