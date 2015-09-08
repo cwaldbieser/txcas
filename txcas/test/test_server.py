@@ -1056,6 +1056,21 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
             d.addBoth(self._printRequests)
         return d
 
+    def test_TGT_expire(self):
+        store = self.store
+        store.tgt_lifespan = 10
+        later = self.deterministic_now() + datetime.timedelta(
+            2*self.store.tgt_lifespan)
+        store.check_expired_interval = store.tgt_lifespan - 1
+        responses = self._createTGTHttpResponses()
+        responses.append((200, json.dumps({'rows': []})))
+        responses.append((200, json.dumps({'rows': []})))
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_TGT_expire()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
     def _createTGTHttpResponses(self):
         store = self.store
         later = self.deterministic_now() + datetime.timedelta(
