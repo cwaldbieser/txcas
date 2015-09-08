@@ -921,6 +921,15 @@ class CouchDBTicketStoreTest(TicketStoreTester, TestCase):
             d.addBoth(self._printRequests)
         return d
 
+    def test_ST_bad_service_serviceValidate(self):
+        responses = self._createServiceTicketHttpResponses()
+        responses.extend(self._createValidateTicketHTTPResponses())
+        self.httpResponseGenerator = iter(responses)
+        d = super(CouchDBTicketStoreTest, self).test_ST_bad_service_serviceValidate()
+        if self.debug:
+            d.addBoth(self._printRequests)
+        return d
+
     def _createTGTHttpResponses(self):
         store = self.store
         later = self.deterministic_now() + datetime.timedelta(
