@@ -18,7 +18,7 @@ def main():
         is_https = raw_input("Use HTTPS [Yn]? ")
         if is_https.strip() == "":
             is_https = "y"
-    is_https = (is_https == "y")
+    is_https = (is_https.lower() == "y")
     host = raw_input("CouchDB Server: ")
     port = ""
     while True:

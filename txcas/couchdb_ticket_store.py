@@ -2,6 +2,7 @@
 # Standard library
 from __future__ import print_function
 import datetime
+from functools import partial
 import json
 import random
 import string
@@ -10,6 +11,7 @@ from textwrap import dedent
 import uuid
 from xml.sax.saxutils import escape as xml_escape
 # Application modules
+from txcas.ca_trust import createCustomPolicyFromPEMs
 from txcas.exceptions import (
     CASError, InvalidTicket, InvalidService,
     NotSSOService, InvalidTicketSpec)
@@ -54,6 +56,7 @@ class CouchDBTicketStoreFactory(object):
             - couch_passwd
             - use_https
             - verify_cert 
+            - ca_cert
             - lt_lifespan
             - st_lifespan
             - pt_lifespan
@@ -143,7 +146,8 @@ class CouchDBTicketStore(object):
 
     def __init__(self, couch_host, couch_port, couch_db,
                 couch_user, couch_passwd, use_https=True,
-                reactor=None, _debug=False, verify_cert=True):
+                reactor=None, _debug=False, verify_cert=True,
+                ca_cert=None):
         if reactor is None:
             from twisted.internet import reactor
         self.reactor = reactor
@@ -155,7 +159,12 @@ class CouchDBTicketStore(object):
         self._couch_user = couch_user
         self._couch_passwd = couch_passwd
         if verify_cert:
-            self.httpClientFactory = createVerifyingHTTPClient
+            if ca_cert:
+                policy_factory = createCustomPolicyFromPEMs(ca_cert)
+            else:
+                policy_factory = None
+            self.httpClientFactory = partial(
+                createVerifyingHTTPClient, policy_factory=policy_factory)
         else:
             self.httpClientFactory = createNonVerifyingHTTPClient
         if use_https:

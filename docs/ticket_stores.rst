@@ -51,6 +51,12 @@ The ticket_store options included in txcas are:
   * :option:`verify_cert`: 1 (True) or 0 (False).  When connecting to the 
     database, verify its X509 cert.  It is useful to set this option to False
     during development if using a self-signed cert.
+  * :option:`ca_cert`: The path to a CA certificate file in PEM format.  The
+    file may contain multiple concatenated certificates.  Thee certificates
+    will automatically be trusted by the HTTP client used to contact the
+    CouchDB database server.  This option is particularly useful if your
+    CouchDB instance uses a certificate signed by an internal (i.e. non-public)
+    certificate authority.
 
 
 Options Common to All Ticket Stores

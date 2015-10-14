@@ -27,7 +27,11 @@ def createNonVerifyingHTTPClient(reactor, agent_kwds=None, **kwds):
     agent_kwds['contextFactory'] = NonVerifyingContextFactory()
     return HTTPClient(Agent(reactor, **agent_kwds), **kwds)
 
-def createVerifyingHTTPClient(reactor, agent_kwds=None, **kwds):
+def createVerifyingHTTPClient(
+        reactor, 
+        agent_kwds=None, 
+        policy_factory=BrowserLikePolicyForHTTPS, 
+        **kwds):
     agent_kwds = normalizeDict_(agent_kwds)
-    agent_kwds['contextFactory'] = BrowserLikePolicyForHTTPS()
+    agent_kwds['contextFactory'] = policy_factory()
     return HTTPClient(Agent(reactor, **agent_kwds), **kwds)

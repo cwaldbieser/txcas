@@ -5,3 +5,9 @@ _trial_temp
 *.tac
 *.json
 docs/_build/*
+ssl/
+static/
+_test
+twistd.pid
+*.passwd
+cas.cfg*
