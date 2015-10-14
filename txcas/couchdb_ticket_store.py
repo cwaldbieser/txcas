@@ -11,7 +11,7 @@ from textwrap import dedent
 import uuid
 from xml.sax.saxutils import escape as xml_escape
 # Application modules
-from txcas.ca_trust import createCustomPolicyFromPEMs
+from txcas.ca_trust import createCustomPolicyFactoryFromPEMs
 from txcas.exceptions import (
     CASError, InvalidTicket, InvalidService,
     NotSSOService, InvalidTicketSpec)
@@ -160,7 +160,7 @@ class CouchDBTicketStore(object):
         self._couch_passwd = couch_passwd
         if verify_cert:
             if ca_cert:
-                policy_factory = createCustomPolicyFromPEMs(ca_cert)
+                policy_factory = createCustomPolicyFactoryFromPEMs(ca_cert)
             else:
                 policy_factory = None
             self.httpClientFactory = partial(

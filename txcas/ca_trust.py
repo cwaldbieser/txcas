@@ -7,7 +7,7 @@
 
 # External modules
 from OpenSSL import crypto
-
+import pem
 from twisted.internet import ssl, defer 
 from twisted.internet.interfaces import IOpenSSLClientConnectionCreator
 from twisted.python.components import proxyForInterface
@@ -47,9 +47,13 @@ class CustomPolicyForHTTPS(object):
 def pem_cert_to_x509(pem_cert):
     return crypto.load_certificate(crypto.FILETYPE_PEM, str(pem_cert))
 
-def createCustomPolicyFromPEMs(*pem_files):
+def createCustomPolicyFactoryFromPEMs(*pem_files):
     authorities = []
     for pem_file in pem_files:
         for cert in pem.parse_file(pem_file):
             authorities.append(pem_cert_to_x509(cert))
-    return CustomPolicyForHTTPS(authorities)
+    
+    def _policyFactory():
+        return CustomPolicyForHTTPS(authorities)
+
+    return _policyFactory
