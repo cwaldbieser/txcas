@@ -88,7 +88,8 @@ class Jinja2ViewProvider(object):
         self._template_folder = template_folder
         self._loader = FileSystemLoader(template_folder)
         self._env = Environment()
-        
+        self._env.loader = self._loader
+
         #self._debug = True
         self._debug = False
 
@@ -122,13 +123,13 @@ class Jinja2ViewProvider(object):
         """
         def render(service_entry, login_ticket, service, failed, request):
             return self._renderTemplate(
-                            VIEW_LOGIN, 
-                            login_ticket=login_ticket, 
-                            service=service, 
+                            VIEW_LOGIN,
+                            login_ticket=login_ticket,
+                            service=service,
                             service_entry=service_entry,
                             failed=failed,
                             request=request)
-        
+
         d = self._getServiceEntry(service)
         d.addCallback(render, login_ticket, service, failed, request)
         return d
@@ -137,15 +138,15 @@ class Jinja2ViewProvider(object):
         """
         """
         return self._renderTemplate(
-                        VIEW_LOGIN_SUCCESS, 
-                        avatar=avatar, 
+                        VIEW_LOGIN_SUCCESS,
+                        avatar=avatar,
                         request=request)
 
     def renderLogout(self, request):
         """
         """
         return self._renderTemplate(
-                        VIEW_LOGOUT, 
+                        VIEW_LOGOUT,
                         request=request)
 
     def renderInvalidService(self, service, request):
@@ -153,8 +154,8 @@ class Jinja2ViewProvider(object):
         """
         def render(service_entry, service, request):
             return self._renderTemplate(
-                            VIEW_INVALID_SERVICE, 
-                            service=service, 
+                            VIEW_INVALID_SERVICE,
+                            service=service,
                             service_entry = service_entry,
                             request=request)
 
@@ -166,15 +167,15 @@ class Jinja2ViewProvider(object):
         """
         """
         return self._renderTemplate(
-                        VIEW_ERROR_5XX, 
-                        err=err, 
+                        VIEW_ERROR_5XX,
+                        err=err,
                         request=request)
-                        
+
     def renderNotFound(self, request):
         """
         """
         return self._renderTemplate(
-                        VIEW_NOT_FOUND, 
+                        VIEW_NOT_FOUND,
                         request=request)
 
     def provideView(self, view_type):
@@ -194,4 +195,3 @@ class Jinja2ViewProvider(object):
             return self.renderNotFound
         else:
             return None
-
