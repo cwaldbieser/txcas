@@ -27,7 +27,7 @@ pycrypto==2.6.1
 pyOpenSSL==17.5.0
 pyparsing==2.2.0
 python-dateutil==2.2
-requests==2.18.4
+requests==2.20.0
 service-identity==14.0.0
 six==1.11.0
 treq==15.0.0
