@@ -31,7 +31,7 @@ requests==2.32.0
 service-identity==14.0.0
 six==1.11.0
 treq==22.1.0
-Twisted==23.10.0
+Twisted==24.7.0
 urllib3==1.26.19
 Werkzeug==3.0.3
 zope.interface==4.4.3
