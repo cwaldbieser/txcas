@@ -10,7 +10,7 @@ cryptography==46.0.7
 enum34==1.1.6
 funcsigs==1.0.2
 hyperlink==18.0.0
-idna==3.7
+idna==3.15
 incremental==17.5.0
 ipaddress==1.0.19
 Jinja2==3.1.6
